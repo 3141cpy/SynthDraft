@@ -1,0 +1,30 @@
+# OpenTelemetry Collector 配置（可选，--profile observability 启用）
+# P0 阶段默认不启用；如需启用需配套 Jaeger/Tempo 后端
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+
+exporters:
+  # 默认丢弃；如需持久化请替换为 jaeger/tempo/otlp 后端
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]

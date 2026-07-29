@@ -1,0 +1,99 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.eggs/
+*.egg-info/
+*.egg
+dist/
+build/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# ===== Node.js =====
+node_modules/
+.next/
+out/
+.nuxt/
+.npm/
+.yarn/install-state.gz
+.pnpm-store/
+.env*.local
+
+# ===== IDE =====
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# ===== OS =====
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ===== 项目特定 =====
+/data/
+/models/
+/logs/
+/tmp/
+*.log
+*.pid
+*.seed
+*.pid.lock
+
+# ===== Docker =====
+infra/.env
+
+# ===== 环境变量文件 =====
+.env
+backend/.env
+*.env
+
+# ===== 本地开发临时文件 =====
+backend/.venv/
+backend/tmp_uploads/
+tmp_audit_logs/
+tmp_metrics/
+tmp_realtest/
+tmp_review_images/
+tmp_state/
+tmp_audit_outputs/
+tmp_p1_gate_logs/
+.playwright_browsers/
+yolo11n.pt
+
+# ===== 后端测试/生成产物 =====
+backend/reports/
+backend/p0_gate_*
+backend/tmp_*
+backend/test_task17_*
+
+# ===== C# / SolidWorks AddIn 构建产物 =====
+bin/
+obj/
+*.SLDPRT
+*.SLDASM
+~$*

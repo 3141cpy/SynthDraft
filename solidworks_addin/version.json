@@ -1,0 +1,9 @@
+{
+  "version": "1.0.0",
+  "solidworks_compatibility": "SolidWorks 2022/2023/2024/2025",
+  "backend_api_version": "v1",
+  "dotnet_framework": "4.8",
+  "release_date": "2026-07-28",
+  "download_url": "",
+  "checksum": ""
+}

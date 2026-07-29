@@ -1,0 +1,169 @@
+# ============================================================
+# SynthDraft Backend Requirements
+# Python 3.11+ required (本地开发推荐 3.13)
+# 所有版本号经 PyPI 查询确认（2026-07-25）
+# ============================================================
+
+# ===== Web 框架 =====
+fastapi==0.140.0
+uvicorn[standard]==0.51.0
+python-multipart==0.0.32
+websockets==16.1.1
+
+# ===== 数据校验与配置 =====
+pydantic==2.13.4
+pydantic-settings==2.14.2
+
+# ===== 数据库 =====
+sqlalchemy[asyncio]==2.0.51
+asyncpg==0.31.0
+alembic==1.18.5
+
+# ===== 任务队列 =====
+celery==5.6.3
+redis==5.0.8
+
+# ===== 向量库与对象存储 =====
+qdrant-client==1.18.0
+minio==7.2.20
+
+# ===== 知识库（Task 3）=====
+# 版本号经 PyPI 查询确认（2026-07-25，pip index versions 复核）
+# pdfplumber：PDF 文本与表格提取（最新稳定 0.11.10，2026-06-15 发布）
+pdfplumber==0.11.10
+# Task 14.1：企业规范导入工具，Word(.docx) 解析（python-docx 1.2.0，2025-04-10 发布）
+python-docx==1.2.0
+# Task 14.1：企业规范导入工具，Excel(.xlsx) 解析（openpyxl 3.1.5，2024-08-21 发布）
+openpyxl==3.1.5
+# pyyaml：YAML frontmatter 序列化
+pyyaml==6.0.2
+# python-frontmatter：Markdown frontmatter 解析
+python-frontmatter==1.0.0
+# sentence-transformers：bge-m3 不可用时的 CPU 友好回退模型载体（5.6.0，2026-06-16）
+sentence-transformers==5.6.0
+# FlagEmbedding：bge-m3 官方包（1.3.3 兼容性稳定版；首次运行从 HuggingFace 下载约 2GB 权重）
+FlagEmbedding==1.3.3
+# llama-index：RAG 检索框架（0.12.33 经 pip index versions 确认存在；.post1 后缀版本不存在）
+llama-index==0.12.33
+# llama-index-vector-stores-qdrant：Qdrant 向量存储集成
+# （0.4.1 不存在；可用版本 0.1.4/0.6.0+/0.7.x/0.8.x/0.9.x/0.10.x。
+#  0.6.1 与 llama-index 0.12.x 同期发布，兼容性最佳）
+llama-index-vector-stores-qdrant==0.6.1
+
+# ===== AI / LLM 客户端 =====
+ollama==0.6.2
+httpx==0.28.1
+openai==2.48.0
+
+# ===== 可观测性 (OpenTelemetry) =====
+# 注意：core 包 (api/sdk/exporter) 使用 1.x 版本号，
+# instrumentation 包使用 0.x 版本号（OpenTelemetry Python 的双轨发布策略）
+# 1.44.0 core 对应 0.65b0 instrumentation（经 PyPI 查询确认）
+opentelemetry-api==1.44.0
+opentelemetry-sdk==1.44.0
+opentelemetry-exporter-otlp==1.44.0
+opentelemetry-instrumentation-fastapi==0.65b0
+opentelemetry-instrumentation-celery==0.65b0
+# Task 16：httpx / requests 客户端自动埋点（OTEL_ENABLED=true 时启用）
+opentelemetry-instrumentation-httpx==0.65b0
+opentelemetry-instrumentation-requests==0.65b0
+structlog==26.1.0
+
+# ===== 安全 =====
+python-jose[cryptography]==3.5.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.2.1
+
+# ===== CAD 文件解析（Task 2）=====
+# 版本号经 PyPI 查询确认（2026-07-25）
+# ezdxf：纯 Python DXF 读写，自带 odafc addon 调用 ODA File Converter
+ezdxf==1.4.4
+# cadquery-ocp：CadQuery 维护的 OpenCascade Python 绑定（OCP 模块），
+# PyPI 名为 cadquery-ocp（包名 OCP），Windows cp313 wheel 可用；
+# 替代 pythonocc-core（Windows 上 pip 难装）。
+# 通过 import OCP 优雅降级检测；若 conda 环境改用 conda-forge 的 pythonocc-core，
+# 可在 occ_engine.py 中通过 try/except 兼容。
+cadquery-ocp==7.9.3.1.1
+# 注意：FreeCAD 与 ODA File Converter 均需外部独立安装，不通过 pip 分发；
+# 见 app/services/cad/README.md 的安装指引。代码中以 try/except 优雅降级。
+
+# ===== SolidWorks 桥接（Task 7，仅 Windows）=====
+# pywin32：Python win32com 客户端，通过 Dispatch "SldWorks.Application" 操作 SolidWorks
+# 官方文档：https://github.com/mhammond/pywin32
+# 仅 Windows 平台安装；Linux 部署时由 environment marker 跳过
+# 代码中以 try/except 优雅降级（is_solidworks_available() 返回 False）
+pywin32>=308; sys_platform == "win32"
+
+# ===== 图像预处理与 OCR 增强（Task 9）=====
+# opencv-python-headless：OpenCV 无 GUI 版，用于去噪/校正/二值化/对比度增强
+# 官方文档：https://docs.opencv.org/
+# 跨平台；headless 版避免 GUI 依赖冲突
+# 代码中以 try/except 优雅降级（is_preprocess_available() 返回 False）
+opencv-python-headless>=4.5
+
+# ===== PDF 渲染（HTML→PDF，Task 4.7 report.py）=====
+# playwright：HTML→PDF 渲染后端（Task 4.7 report.py 真实路径之一）
+# 官方文档：https://playwright.dev/python/
+# 安装后需执行 `python -m playwright install chromium` 拉取浏览器
+# 代码中以 try/except 优雅降级（_generate_pdf_via_playwright 返回 None 时降级到其他后端）
+# 注：如默认浏览器路径（%LOCALAPPDATA%\ms-playwright）不可写，
+#     可设置环境变量 PLAYWRIGHT_BROWSERS_PATH 指向可写目录
+playwright==1.61.0
+
+# ===== 目标检测（Task 9.3）=====
+# ultralytics：YOLOv11 工程图区域检测（Task 9.3 真实路径）
+# 官方文档：https://docs.ultralytics.com/
+# 跨平台；首次运行自动下载预训练权重
+# 代码中以 try/except 优雅降级（is_detector_available() 返回 False 时降级到 VLM）
+ultralytics==8.4.108
+
+# ===== 测试 =====
+pytest==8.4.2
+pytest-asyncio==0.24.0
+asgi-lifespan==2.1.0
+
+# ============================================================
+# 显式声明代码中直接使用的传递依赖
+# ============================================================
+# 以下包原本通过其他包的依赖间接安装，但代码中直接 import，应显式声明。
+# 版本号取自当前 venv 实际安装版本（pip show 复核，2026-07-28）。
+
+# psycopg2-binary：PostgreSQL 同步驱动
+# （app/services/kb/version_manager.py、standard_profile.py 等使用；
+#  asyncpg 是异步驱动，不能直接给 psycopg2.connect 用，必须单独安装）
+psycopg2-binary==2.9.12
+# Pillow：图像处理
+# （app/services/kb/vlm_ocr.py、region_detector.py 等多处使用；
+#  通常由 opencv-python-headless / pdfplumber 间接带入，但代码直接 import PIL）
+Pillow==12.3.0
+# numpy：数值计算
+# （多模块使用；通常由 opencv / pandas 等间接带入）
+numpy==2.3.5
+# cadquery：CadQuery 高层 API
+# （app/services/cad/writer.py 等使用；与 cadquery-ocp 是不同包，
+#  cadquery-ocp 只提供 OCP 底层绑定，cadquery 才提供 cq 高层 API）
+cadquery==2.8.0
+# jinja2：模板渲染
+# （app/services/kb/report.py 等使用；通常由 fastapi 等间接带入）
+jinja2==3.1.6
+# anthropic：Anthropic Claude LLM 提供者
+# （app/services/llm/anthropic_provider.py 直接 import anthropic）
+anthropic==0.120.0
+
+# ------------------------------------------------------------
+# 可选后端包（report.py 多后端降级，缺失时优雅降级）
+# ------------------------------------------------------------
+# 以下包在 app/services/kb/report.py 中作为可选 PDF/OCR/绘图后端使用，
+# 代码中以 try/except 优雅降级；不安装不影响主流程，但安装后可启用对应后端。
+# 版本号取自当前 venv 实际安装版本（pip show 复核，2026-07-28）。
+
+# weasyprint：HTML/CSS 转 PDF 后端（report.py PDFReportBackend 优先使用）
+weasyprint==69.0
+# pdfkit：wkhtmltopdf 封装，PDF 后端降级方案之一
+pdfkit==1.0.0
+# xhtml2pdf：纯 Python HTML 转 PDF，无外部二进制依赖的降级方案
+xhtml2pdf==0.2.17
+# paddleocr：PaddleOCR 引擎，VL-OCR 流水线降级方案之一
+paddleocr==3.7.0
+# matplotlib：图表/绘图后端（report.py 图表生成等场景）
+matplotlib==3.11.1

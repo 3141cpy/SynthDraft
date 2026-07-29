@@ -1,0 +1,82 @@
+# ============================================================
+# SynthDraft 可观测性栈（Grafana + Tempo + Prometheus + Flower）
+# 镜像 tag 均经查询确认（2026-07-25，GitHub Releases / Docker Hub）
+# 启动: docker compose -f docker-compose.observability.yml --profile observability up -d
+# 与主 docker-compose.yml 共享同一网络（synthdraft_default）
+# ============================================================
+
+name: synthdraft
+
+networks:
+  default:
+    name: synthdraft_default
+    external: true
+
+services:
+  # ===== Grafana 12.2.0 (可视化仪表盘) =====
+  # Tag confirmed via GitHub Releases: grafana/grafana v12.2.0
+  grafana:
+    image: grafana/grafana:12.2.0
+    container_name: synthdraft-grafana
+    restart: unless-stopped
+    profiles: ["observability"]
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana-dashboard.json:/etc/grafana/provisioning/dashboards/synthdraft-dashboard.json:ro
+    depends_on:
+      - tempo
+      - prometheus
+
+  # ===== Tempo 2.8.1 (分布式 tracing 后端，存储 OTLP spans) =====
+  # Tag confirmed via GitHub Releases: grafana/tempo v2.8.1
+  tempo:
+    image: grafana/tempo:2.8.1
+    container_name: synthdraft-tempo
+    restart: unless-stopped
+    profiles: ["observability"]
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    ports:
+      - "4318:4318"   # OTLP HTTP（与主 compose 的 otel-collector 区分；如已启用 collector，注释此行）
+      - "3200:3200"   # Tempo HTTP API / Grafana 数据源
+    volumes:
+      - ./tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo_data:/var/tempo
+
+  # ===== Prometheus v3.4.0 (metrics 抓取) =====
+  # Tag confirmed via GitHub Releases: prometheus/prometheus v3.4.0
+  prometheus:
+    image: prom/prometheus:v3.4.0
+    container_name: synthdraft-prometheus
+    restart: unless-stopped
+    profiles: ["observability"]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+
+  # ===== Celery Flower 2.0.1 (Celery 任务监控 Web UI) =====
+  # Tag confirmed via PyPI/GitHub: mher/flower 2.0.1
+  flower:
+    image: mher/flower:2.0.1
+    container_name: synthdraft-flower
+    restart: unless-stopped
+    profiles: ["observability"]
+    environment:
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
+      FLOWER_PORT: "5555"
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+
+volumes:
+  grafana_data:
+  tempo_data:
+  prometheus_data:

@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>审图报告 - {{ task_id }}</title>
+<style>
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+    margin: 0;
+    padding: 24px;
+    color: #1a1a1a;
+    background: #f5f5f5;
+  }
+  .container {
+    max-width: 1100px;
+    margin: 0 auto;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    overflow: hidden;
+  }
+  .header {
+    background: linear-gradient(135deg, #1e3a5f 0%, #2c5282 100%);
+    color: #fff;
+    padding: 24px 32px;
+  }
+  .header h1 {
+    margin: 0 0 8px 0;
+    font-size: 22px;
+    font-weight: 600;
+  }
+  .header .meta {
+    font-size: 13px;
+    opacity: 0.85;
+    line-height: 1.6;
+  }
+  .section {
+    padding: 24px 32px;
+    border-bottom: 1px solid #eee;
+  }
+  .section:last-child { border-bottom: none; }
+  .section h2 {
+    margin: 0 0 16px 0;
+    font-size: 17px;
+    color: #1e3a5f;
+    border-left: 4px solid #2c5282;
+    padding-left: 10px;
+  }
+  .score-card {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 16px;
+    background: #f8fafc;
+    border-radius: 6px;
+  }
+  .score-number {
+    font-size: 42px;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .score-number.pass { color: #2f855a; }
+  .score-number.warn { color: #d69e2e; }
+  .score-number.fail { color: #c53030; }
+  .score-label {
+    font-size: 13px;
+    color: #666;
+    margin-top: 4px;
+  }
+  .score-detail {
+    font-size: 13px;
+    color: #444;
+    line-height: 1.7;
+  }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #fff;
+  }
+  .badge-critical { background: #c53030; }
+  .badge-major { background: #dd6b20; }
+  .badge-minor { background: #d69e2e; }
+  .badge-warning { background: #718096; }
+  .badge-mode { background: #2c5282; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 8px;
+    border-bottom: 1px solid #e2e8f0;
+    vertical-align: top;
+  }
+  th {
+    background: #f7fafc;
+    font-weight: 600;
+    color: #2d3748;
+  }
+  tr:hover td { background: #f7fafc; }
+  .defect-suggestion {
+    color: #2c5282;
+    font-weight: 500;
+  }
+  .defect-evidence {
+    color: #666;
+    font-style: italic;
+    margin-top: 4px;
+    font-size: 12px;
+  }
+  .image-container {
+    position: relative;
+    border: 1px solid #e2e8f0;
+    border-radius: 4px;
+    overflow: hidden;
+    background: #fff;
+  }
+  .image-container img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+  }
+  .image-container svg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+  .highlight-rect {
+    fill: rgba(255, 193, 7, 0.25);
+    stroke: #ffc107;
+    stroke-width: 2;
+  }
+  .no-image {
+    padding: 24px;
+    text-align: center;
+    color: #999;
+    background: #f7fafc;
+    border-radius: 4px;
+  }
+  .footer {
+    padding: 16px 32px;
+    background: #f7fafc;
+    font-size: 12px;
+    color: #666;
+    text-align: center;
+  }
+  .empty-defects {
+    padding: 32px;
+    text-align: center;
+    color: #2f855a;
+    font-weight: 500;
+  }
+  .vlm-grid {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    gap: 8px 16px;
+    font-size: 13px;
+  }
+  .vlm-grid .vlm-key {
+    color: #555;
+    font-weight: 600;
+  }
+  .vlm-grid .vlm-val {
+    color: #1a1a1a;
+    word-break: break-all;
+  }
+  .vlm-empty {
+    padding: 16px;
+    text-align: center;
+    color: #999;
+    background: #f7fafc;
+    border-radius: 4px;
+    font-size: 13px;
+  }
+  .vlm-dim-list {
+    margin: 0;
+    padding-left: 18px;
+  }
+  .vlm-dim-list li { margin: 2px 0; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <h1>SynthDraft 智能审图报告</h1>
+    <div class="meta">
+      任务 ID：{{ task_id }}<br>
+      文件：{{ file_key }}（{{ file_type }}）<br>
+      生成时间：{{ generated_at }}<br>
+      审图模式：<span class="badge badge-mode">{{ review_mode }}</span>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>合规性评分</h2>
+    <div class="score-card">
+      <div>
+        <div class="score-number {{ 'pass' if compliance_score >= 85 else ('warn' if compliance_score >= 60 else 'fail') }}">
+          {{ "%.1f"|format(compliance_score) }}
+        </div>
+        <div class="score-label">满分 100</div>
+      </div>
+      <div class="score-detail">
+        缺陷统计：
+        <span class="badge badge-critical">致命 {{ severity_counts.get('critical', 0) }}</span>
+        <span class="badge badge-major">严重 {{ severity_counts.get('major', 0) }}</span>
+        <span class="badge badge-minor">一般 {{ severity_counts.get('minor', 0) }}</span>
+        <span class="badge badge-warning">警告 {{ severity_counts.get('warning', 0) }}</span>
+        <br>
+        适用规范：{{ standards_applied | join(", ") }}
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>图纸预览（含缺陷定位高亮）</h2>
+    {% if image_base64 %}
+    <div class="image-container">
+      <img src="data:image/png;base64,{{ image_base64 }}" alt="DXF 渲染图">
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+        {% for d in defects if d.coordinate %}
+        <rect class="highlight-rect"
+              x="{{ d.coordinate.get('x', 0) }}" y="{{ d.coordinate.get('y', 0) }}"
+              width="3" height="3" rx="0.3">
+          <title>{{ d.category }}: {{ d.evidence }}</title>
+        </rect>
+        {% endfor %}
+      </svg>
+    </div>
+    <div style="font-size:12px;color:#666;margin-top:8px;">
+      注：高亮坐标基于 model space，SVG 叠加为示意定位，实际像素位置需按图纸比例换算。
+    </div>
+    {% elif image_filename %}
+    <div class="image-container">
+      <img src="{{ image_filename }}" alt="DXF 渲染图">
+    </div>
+    {% else %}
+    <div class="no-image">未生成图纸渲染图片（DXF 渲染失败或跳过）</div>
+    {% endif %}
+  </div>
+
+  <div class="section">
+    <h2>缺陷列表（共 {{ defects | length }} 条）</h2>
+    {% if defects %}
+    <table>
+      <thead>
+        <tr>
+          <th style="width:5%;">#</th>
+          <th style="width:10%;">类别</th>
+          <th style="width:10%;">严重等级</th>
+          <th style="width:18%;">规范引用</th>
+          <th style="width:30%;">修改建议</th>
+          <th style="width:27%;">证据</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in defects %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td>{{ d.category }}</td>
+          <td><span class="badge badge-{{ d.severity }}">{{ d.severity }}</span></td>
+          <td>{{ d.standard_ref }}{% if d.standard_clause_id %}<br><small>条款 {{ d.standard_clause_id }}</small>{% endif %}</td>
+          <td class="defect-suggestion">{{ d.suggestion }}</td>
+          <td>
+            {{ d.evidence }}
+            {% if d.coordinate %}<br><small>坐标 ({{ "%.2f"|format(d.coordinate.get('x', 0)) }}, {{ "%.2f"|format(d.coordinate.get('y', 0)) }})</small>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-defects">✓ 未发现合规性缺陷，图纸符合审查规范</div>
+    {% endif %}
+  </div>
+
+  {% set vlm = metadata.get('vlm_ocr_extras') if metadata else none %}
+  {% if vlm %}
+  <div class="section">
+    <h2>VLM OCR 识别结果</h2>
+    {# VLM 输出 key 非确定性:可能为英文(prompt 要求)或中文(模型自由发挥),此处双兜底 #}
+    {# 同时过滤"无"/"null"/"None"等占位值 #}
+    {% set _empty_markers = ('无', 'null', 'None', 'none', 'N/A', 'n/a', '/', '-') %}
+    {% set v_title = vlm.get('title') or vlm.get('标题') %}
+    {% set v_drawing_number = vlm.get('drawing_number') or vlm.get('图纸号') or vlm.get('图号') %}
+    {% set v_material = vlm.get('material') or vlm.get('材料') %}
+    {% set v_scale = vlm.get('scale') or vlm.get('比例') %}
+    {% set v_dimensions = vlm.get('dimensions') or vlm.get('尺寸') or vlm.get('尺寸标注') %}
+    {% set v_tech_req = vlm.get('technical_requirements') or vlm.get('技术要求') %}
+    {% set v_surface = vlm.get('surface_roughness') or vlm.get('表面粗糙度') %}
+    {% set v_tolerance = vlm.get('tolerance') or vlm.get('公差') or vlm.get('形位公差') %}
+    {% set v_vlm_model = vlm.get('vlm_model') %}
+    {# 判断字符串值是否有效(非空且非占位符) #}
+    {% set title_valid = v_title is string and v_title.strip() and v_title.strip() not in _empty_markers %}
+    {% set dn_valid = v_drawing_number is string and v_drawing_number.strip() and v_drawing_number.strip() not in _empty_markers %}
+    {% set mat_valid = v_material is string and v_material.strip() and v_material.strip() not in _empty_markers %}
+    {% set sc_valid = v_scale is string and v_scale.strip() and v_scale.strip() not in _empty_markers %}
+    {% set dim_valid = v_dimensions and (v_dimensions is string or (v_dimensions is sequence and v_dimensions|length > 0)) %}
+    {% set tr_valid = v_tech_req is string and v_tech_req.strip() and v_tech_req.strip() not in _empty_markers %}
+    {% set sr_valid = v_surface is string and v_surface.strip() and v_surface.strip() not in _empty_markers %}
+    {% set to_valid = v_tolerance is string and v_tolerance.strip() and v_tolerance.strip() not in _empty_markers %}
+    {% set vm_valid = v_vlm_model is string and v_vlm_model.strip() %}
+    {% set has_any = title_valid or dn_valid or mat_valid or sc_valid or dim_valid or tr_valid or sr_valid or to_valid or vm_valid %}
+    {% if not has_any %}
+    <div class="vlm-empty">VLM OCR 已运行，但未识别到任何有效字段值</div>
+    {% else %}
+    <div class="vlm-grid">
+      {% if title_valid %}
+      <div class="vlm-key">图样标题</div>
+      <div class="vlm-val">{{ v_title }}</div>
+      {% endif %}
+      {% if dn_valid %}
+      <div class="vlm-key">图号</div>
+      <div class="vlm-val">{{ v_drawing_number }}</div>
+      {% endif %}
+      {% if mat_valid %}
+      <div class="vlm-key">材料</div>
+      <div class="vlm-val">{{ v_material }}</div>
+      {% endif %}
+      {% if sc_valid %}
+      <div class="vlm-key">比例</div>
+      <div class="vlm-val">{{ v_scale }}</div>
+      {% endif %}
+      {% if dim_valid %}
+      <div class="vlm-key">尺寸标注</div>
+      <div class="vlm-val">
+        {% if v_dimensions is string %}
+        {{ v_dimensions }}
+        {% else %}
+        <ul class="vlm-dim-list">
+          {% for d in v_dimensions %}
+          <li>{{ d.get('value', d) if d is mapping else d }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+      {% endif %}
+      {% if tr_valid %}
+      <div class="vlm-key">技术要求</div>
+      <div class="vlm-val">{{ v_tech_req }}</div>
+      {% endif %}
+      {% if sr_valid %}
+      <div class="vlm-key">表面粗糙度</div>
+      <div class="vlm-val">{{ v_surface }}</div>
+      {% endif %}
+      {% if to_valid %}
+      <div class="vlm-key">公差</div>
+      <div class="vlm-val">{{ v_tolerance }}</div>
+      {% endif %}
+      {% if vm_valid %}
+      <div class="vlm-key">VLM 模型</div>
+      <div class="vlm-val">{{ v_vlm_model }}</div>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <div class="footer">
+    本报告由 SynthDraft 智能审图系统自动生成（review_mode={{ review_mode }}）<br>
+    {% if review_mode == 'rule_engine' %}
+    当前为规则引擎降级模式（LLM 不可用），缺陷判定基于硬编码规则。
+    {% elif review_mode == 'vector_only' %}
+    当前为矢量级精度模式（VLM 不可用），未做图片 OCR。
+    {% endif %}
+  </div>
+
+</div>
+</body>
+</html>
