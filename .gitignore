@@ -97,3 +97,35 @@ obj/
 *.SLDPRT
 *.SLDASM
 ~$*
+
+# ===== 仓库治理：开发过程产物不入库 =====
+# 调试脚本（仅本地使用）
+backend/tests/debug_*.py
+# 任务验证脚本已移至 verification/ 子目录，根目录不再保留
+backend/tests/verify_task*.py
+backend/tests/_pull_model.py
+backend/tests/realtest_*.py
+backend/tests/gen_typelib.py
+# 测试输出产物
+solidworks_addin/verify_task*_report.json
+# .trae 迭代过程 spec（仅保留主 spec + coderabbit + 当前 spec）
+.trae/documents/
+.trae/specs/audit-p0p1-and-extend-ai-providers/
+.trae/specs/complete-final-acceptance-and-fix/
+.trae/specs/complete-remaining-test-gaps/
+.trae/specs/execute-comprehensive-v2v4-verification/
+.trae/specs/execute-solidworks-worker-realpath-test/
+.trae/specs/fix-remaining-env-issues-except-remote-vlm/
+.trae/specs/fix-remaining-issues-and-upgrade-to-pass/
+.trae/specs/further-reduce-llm-hallucination/
+.trae/specs/further-reduce-llm-hallucination-v4/
+.trae/specs/implement-solidworks-addin/
+.trae/specs/optimize-llm-prompt-reduce-hallucination/
+.trae/specs/polish-frontend-design-system/
+.trae/specs/polish-frontend-runtime-tests-supplement/
+.trae/specs/proactively-install-missing-deps-and-reverify/
+.trae/specs/realpath-test-backend-api/
+.trae/specs/remediate-audit-gaps-retest/
+.trae/specs/remediate-v2v4-followup-suggestions/
+.trae/specs/retest-vlm-dimension-and-deepseek-collaboration/
+.trae/specs/verify-and-refine-task13-private-deployment/
