@@ -125,7 +125,9 @@ async def get_review_result(
     if state == "SUCCESS":
         data = result.result
         if isinstance(data, dict):
-            data = {**data, "status": "completed"}
+            # P2-2 修复：SUCCESS 状态术语统一为 "succeeded"
+            # （原 "completed" 与 tasks.py / ws.py 的 "succeeded" 不一致）
+            data = {**data, "status": "succeeded"}
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content=data,

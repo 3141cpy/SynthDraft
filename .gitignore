@@ -121,3 +121,11 @@ solidworks_addin/verify_task*_report.json
 /cache/
 frontend/e2e_screenshots/
 backend/synthdraft_test.db
+
+# ===== docs 下测试脚本与产物（保留本地，不入库）=====
+docs/test_*.py
+docs/discover_*.json
+docs/test-results.json
+docs/test-retest.json
+docs/screenshots/
+-w

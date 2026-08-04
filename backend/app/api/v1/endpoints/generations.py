@@ -139,7 +139,8 @@ async def get_generation_result(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"task {task_id} not found or pending",
         )
-    if state == "STARTED" or state == "RETRY":
+    # P2-2 修复：补充 PROGRESS 状态处理（原缺失会导致 PROGRESS 误入 SUCCESS 分支）
+    if state in ("STARTED", "RETRY", "PROGRESS"):
         return JSONResponse(
             status_code=status.HTTP_202_ACCEPTED,
             content=GenerationResult(

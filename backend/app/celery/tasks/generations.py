@@ -44,6 +44,29 @@ from app.services.generation import (
 log = get_logger(__name__)
 
 
+def _get_active_llm_model() -> str | None:
+    """获取当前激活 LLM provider 的 model 字段（反映数据库活跃配置）。
+
+    P2-1 修复：原代码直接读 ``settings.LLM_MODEL``（.env），与数据库活跃
+    provider 不一致。本函数优先从数据库活跃配置（``role="llm" AND is_active=True``）
+    读取 ``model`` 字段；DB 无配置或不可达时回退 ``settings.LLM_MODEL``
+    （兼容纯 .env 部署与 legacy 路径）。
+
+    Returns:
+        激活配置的 model 字段；无任何配置时返回 None。
+    """
+    try:
+        from app.services.ai.base import _load_active_config_sync
+
+        config = _load_active_config_sync("llm")
+        if config is not None:
+            return getattr(config, "model", "") or None
+    except Exception as e:  # noqa: BLE001
+        log.warning("generation.llm_model.lookup_failed", error=str(e))
+    # DB 无配置或不可达时回退到 settings（legacy/.env 部署）
+    return settings.LLM_MODEL or None
+
+
 def generate_and_execute_with_fallback(
     prompt: str,
     out_dir: Path,
@@ -292,7 +315,7 @@ def run_generation(
             "output_format": fmt,
             "codegen_elapsed_ms": gen_elapsed_ms,
             "llm_available": is_llm_available(),
-            "llm_model": settings.LLM_MODEL if is_llm_available() else None,
+            "llm_model": _get_active_llm_model() if is_llm_available() else None,
             "run_id": run_id,
             "self_review_task_id": self_review_task_id,
             "self_review_status": self_review_status,

@@ -18,10 +18,15 @@ log = get_logger(__name__)
 
 
 def _map_state(state: str) -> str:
+    """将 Celery 原生状态映射为业务状态。
+
+    P2-2 修复：补充 PROGRESS → "running"（与 tasks.py _map_celery_state 对齐）。
+    """
     mapping = {
         "PENDING": "queued",
         "RECEIVED": "queued",
         "STARTED": "running",
+        "PROGRESS": "running",
         "RETRY": "running",
         "SUCCESS": "succeeded",
         "FAILURE": "failed",
@@ -39,7 +44,12 @@ async def task_progress_ws(websocket: WebSocket, task_id: str) -> None:
         while True:
             result = celery_app.AsyncResult(task_id)
             state = _map_state(result.state)
-            payload: dict = {"task_id": task_id, "status": state, "progress": 0}
+            # P2-2 修复：progress 从 task.info 读取真实值（PROGRESS 状态下
+            # task.info 为 dict 含 progress 字段）；其他状态默认 0。
+            progress = 0
+            if state == "running" and isinstance(result.info, dict):
+                progress = result.info.get("progress", 0)
+            payload: dict = {"task_id": task_id, "status": state, "progress": progress}
             if state == "succeeded":
                 payload["result"] = (
                     result.result if isinstance(result.result, dict)

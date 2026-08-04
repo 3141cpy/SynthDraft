@@ -83,7 +83,7 @@ async def optimize_from_review(
             "output_format": payload.output_format,
             "auto_re_review": payload.auto_re_review,
         },
-        queue="default",
+        queue="generations",
     )
     task_id = async_result.id
     register_task(task_id, "collaboration")

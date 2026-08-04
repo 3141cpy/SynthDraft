@@ -72,18 +72,16 @@ def load_image(image_path: Path) -> "np.ndarray":
     if not image_path.is_file():
         raise FileNotFoundError(f"图片不存在：{image_path}")
 
-    # cv2.imread 不支持中文路径，用 np.fromfile + cv2.imdecode 兜底
-    try:
-        img = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
-        if img is None:
-            raise ValueError("cv2.imread 返回 None")
-    except Exception:
-        log.debug("preprocess.imread_fallback", path=str(image_path))
-        import numpy as _np
-        data = _np.fromfile(str(image_path), dtype=_np.uint8)
-        img = cv2.imdecode(data, cv2.IMREAD_COLOR)
-        if img is None:
-            raise ValueError(f"cv2.imdecode 失败：{image_path}")
+    # P2-3 修复：cv2.imread 不支持中文路径（如"安全阀.pdf"渲染的 PNG），
+    # 在 Windows 上会静默返回 None 或抛异常。原 try/except 兜底在部分
+    # cv2 版本下仍可能漏掉（如 imread 返回非 None 的损坏数据）。
+    # 直接使用 np.fromfile + cv2.imdecode 是中文路径的可靠方案：
+    # np.fromfile 按 Unicode 路径读取原始字节，cv2.imdecode 解码为 ndarray。
+    import numpy as _np
+    data = _np.fromfile(str(image_path), dtype=_np.uint8)
+    img = cv2.imdecode(data, cv2.IMREAD_COLOR)
+    if img is None:
+        raise ValueError(f"cv2.imdecode 失败（文件可能不是有效图片）：{image_path}")
 
     return img
 
