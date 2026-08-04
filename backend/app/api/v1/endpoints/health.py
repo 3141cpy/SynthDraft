@@ -29,36 +29,59 @@ log = get_logger(__name__)
     "/healthz",
     response_model=HealthResponse,
     summary="存活探针",
-    description="表明进程在运行。不检查依赖，但会附带当前 LLM provider 的可用性快照。",
+    description=(
+        "表明进程在运行。不检查依赖，但会附带当前 LLM 与 VLM provider 的可用性快照。"
+        "split-llm-vlm-config：LLM 与 VLM 独立探测，互不影响。"
+    ),
 )
 async def healthz(settings: Settings = SettingsDep) -> HealthResponse:
-    # SubTask 3.6：暴露当前 LLM provider 与可用性。
+    # split-llm-vlm-config：LLM 与 VLM 分别探测，各自独立降级。
     # 延迟 import 避免启动时初始化 provider（provider 初始化会探测远端，可能阻塞）。
     # 同步 provider 方法通过 to_thread 放到线程池，避免阻塞事件循环；
     # 任何异常都降级为 False，不让 healthz 抛 500。
-    provider_name = settings.LLM_PROVIDER
+    llm_provider_name = settings.LLM_PROVIDER
+    vlm_provider_name = ""
     llm_available = False
     vlm_available = False
-    try:
-        from app.services.ai import get_llm_provider
 
-        provider = get_llm_provider()
+    # === LLM 探测 ===
+    try:
+        from app.services.ai import get_active_provider_type, get_llm_provider
+
+        llm_provider_name = get_active_provider_type("llm")
+        llm_provider = get_llm_provider()
         llm_available = await asyncio.wait_for(
-            asyncio.to_thread(provider.is_available), timeout=5.0
-        )
-        vlm_available = await asyncio.wait_for(
-            asyncio.to_thread(provider.is_vlm_available), timeout=5.0
+            asyncio.to_thread(llm_provider.is_available), timeout=5.0
         )
     except asyncio.TimeoutError:
-        log.warning("healthz.provider_probe_timeout", provider=provider_name)
+        log.warning("healthz.llm_probe_timeout", provider=llm_provider_name)
     except Exception as e:  # noqa: BLE001
-        log.warning("healthz.provider_probe_failed", provider=provider_name, error=str(e))
+        log.warning("healthz.llm_probe_failed", provider=llm_provider_name, error=str(e))
+
+    # === VLM 探测（独立于 LLM）===
+    try:
+        from app.services.ai import get_vlm_provider
+
+        vlm_provider_name = get_active_provider_type("vlm")
+        vlm_provider = get_vlm_provider()
+        if vlm_provider is None:
+            # 未配置 VLM（DB 无 role="vlm" 激活配置且 legacy 也无 vlm_model）
+            vlm_available = False
+        else:
+            vlm_available = await asyncio.wait_for(
+                asyncio.to_thread(vlm_provider.is_vlm_available), timeout=5.0
+            )
+    except asyncio.TimeoutError:
+        log.warning("healthz.vlm_probe_timeout", provider=vlm_provider_name)
+    except Exception as e:  # noqa: BLE001
+        log.warning("healthz.vlm_probe_failed", provider=vlm_provider_name, error=str(e))
 
     return HealthResponse(
         service=settings.APP_NAME,
         version=settings.APP_VERSION,
-        llm_provider=provider_name,
+        llm_provider=llm_provider_name,
         llm_available=llm_available,
+        vlm_provider=vlm_provider_name,
         vlm_available=vlm_available,
     )
 

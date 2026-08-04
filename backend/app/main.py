@@ -19,7 +19,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import api_router
 from app.config import settings
+from app.database import async_session_factory, init_db
 from app.logging import configure_logging, get_logger
+from app.services.ai.base import refresh_active_config_cache
+from app.services.ai.config_store import migrate_from_env
 from app.tracing import configure_tracing, instrument_fastapi
 
 # 初始化日志（最早执行，确保后续日志可用）
@@ -39,6 +42,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         version=settings.APP_VERSION,
         env=settings.APP_ENV,
     )
+    # 建表 + .env 旧配置迁移（失败不阻断启动，避免数据库不可用时服务无法启动）
+    try:
+        await init_db()
+        log.info("app.init_db.done")
+    except Exception as e:  # noqa: BLE001
+        log.warning("app.init_db.failed", error=str(e))
+    try:
+        async with async_session_factory() as session:
+            migrated = await migrate_from_env(session)
+            log.info("app.migrate_from_env.done", migrated=migrated)
+    except Exception as e:  # noqa: BLE001
+        log.warning("app.migrate_from_env.failed", error=str(e))
+    # 预填激活配置同步缓存，使后续 sync get_llm_provider() / healthz 能立即读到
+    # DB 激活配置，而非走 legacy settings fallback（避免重启后首次 healthz 显示旧 provider）。
+    try:
+        await refresh_active_config_cache()
+        log.info("app.refresh_active_config_cache.done")
+    except Exception as e:  # noqa: BLE001
+        log.warning("app.refresh_active_config_cache.failed", error=str(e))
     yield
     log.info("app.stopping", name=settings.APP_NAME)
 

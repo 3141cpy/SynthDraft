@@ -1,6 +1,7 @@
 import {
   BookOpen,
   FileSearch,
+  Settings,
   Wand2,
   type LucideIcon,
 } from "lucide-react";
@@ -17,6 +18,7 @@ export const navItems: NavItem[] = [
   { href: "/review", label: "审图工作台", icon: FileSearch },
   { href: "/generate", label: "生成工作台", icon: Wand2 },
   { href: "/kb", label: "知识库", icon: BookOpen },
+  { href: "/settings", label: "设置", icon: Settings },
 ];
 
 /** 判断给定 pathname 是否处于指定 href 下（含子路由）。 */

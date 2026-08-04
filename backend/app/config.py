@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     APP_VERSION: str = "0.1.0"
     LOG_LEVEL: str = "DEBUG"
     UPLOAD_DIR: str = "./tmp_uploads"
+    # DXF/DWG 渲染 PNG 默认输出目录（相对 backend cwd）
+    REVIEW_IMAGE_DIR: str = "./tmp_review_images"
 
     # ===== PostgreSQL =====
     POSTGRES_HOST: str = "postgres"
@@ -59,23 +61,19 @@ class Settings(BaseSettings):
     MINIO_SECURE: bool = False
 
     # ===== Ollama / vLLM =====
+    # deprecated, use DB config via /settings page：以下旧字段仅作 .env 迁移源，
+    # 由 ``config_store.migrate_from_env`` 在首次启动时迁入 ``ai_provider_configs`` 表。
     OLLAMA_HOST_URL: str = "http://ollama:11434"
+    # vLLM 暴露 OpenAI 兼容 API，Task 2.6 起统一归为 openai_compatible 类型，
+    # 以下三字段仅作迁移源保留（VLLM_BASE_URL / VLLM_MODEL / VLLM_ENABLED）。
     VLLM_BASE_URL: str = "http://vllm:8000/v1"
-
-    # ===== SubTask 13.1: vLLM 本地 GPU 推理优化 =====
-    # 是否启用 vLLM provider（False 时即使 LLM_PROVIDER=vllm 也会降级到 ollama）
+    # 是否启用 vLLM provider（False 时 LLM_PROVIDER=vllm 会降级到 ollama）
     VLLM_ENABLED: bool = False
     # vLLM 加载的模型名（HuggingFace repo 或本地路径）
     VLLM_MODEL: str = "Qwen/Qwen2.5-Coder-7B-Instruct"
-    # 量化方案："" / "awq" / "gptq" / "int8" / "fp8"
-    # 留空表示不量化；与 vLLM --quantization 参数对齐
-    VLLM_QUANTIZATION: str = ""
-    # 张量并行大小（多 GPU 卡数）
-    VLLM_TENSOR_PARALLEL_SIZE: int = 1
-    # GPU 显存利用率上限（0.0-1.0）
-    VLLM_GPU_MEMORY_UTILIZATION: float = 0.9
-    # vLLM 视觉模型名（留空则不启用 VLM 路径）
-    VLLM_VLM_MODEL: str = ""
+    # 注：VLLM_QUANTIZATION / VLLM_TENSOR_PARALLEL_SIZE /
+    # VLLM_GPU_MEMORY_UTILIZATION / VLLM_VLM_MODEL 已移除——这些是 vLLM 服务端
+    # 启动参数，不属于应用层配置（如需配置 vlm_model，请用 DB 配置的 vlm_model 字段）。
 
     # ===== SubTask 13.2: 离线安装包 =====
     # 离线模式开关：True 时禁用所有外部网络调用（HF 下载 / 模型拉取 / 远程 API）
@@ -99,9 +97,12 @@ class Settings(BaseSettings):
     AUDIT_LOG_PATH: str = "./tmp_audit/security_audit.jsonl"
 
     # ===== LLM 模型 =====
+    # deprecated, use DB config via /settings page：以下旧字段仅作 .env 迁移源，
+    # 由 ``config_store.migrate_from_env`` 在首次启动时迁入 ``ai_provider_configs`` 表。
     LLM_PROVIDER: str = "ollama"
     LLM_MODEL: str = "qwen2.5-coder:7b"
-    VLM_MODEL: str = "qwen2.5-vl:7b"
+    # 注：VLM_MODEL 孤立字段已移除——无 provider 读取它（Ollama 自动探测 VLM，
+    # 其他 provider 用各自的 *_VLM_MODEL）。视觉模型统一用 DB 配置的 vlm_model 字段。
     EMBEDDING_MODEL: str = "bge-m3"
 
     # ===== HuggingFace 镜像端点(中国境内加速 bge-m3 / sentence-transformers 下载)=====
@@ -111,12 +112,16 @@ class Settings(BaseSettings):
     HF_HUB_DOWNLOAD_TIMEOUT: str = "60"
 
     # ===== OpenAI 兼容（vLLM / DeepSeek / 通义千问 / 智谱 GLM / OpenAI 官方）=====
+    # deprecated, use DB config via /settings page：以下旧字段仅作 .env 迁移源，
+    # 由 ``config_store.migrate_from_env`` 在首次启动时迁入 ``ai_provider_configs`` 表。
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_VLM_MODEL: str = "gpt-4o"
 
     # ===== Anthropic Claude =====
+    # deprecated, use DB config via /settings page：以下旧字段仅作 .env 迁移源，
+    # 由 ``config_store.migrate_from_env`` 在首次启动时迁入 ``ai_provider_configs`` 表。
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_BASE_URL: str = "https://api.anthropic.com"
     ANTHROPIC_MODEL: str = "claude-3-5-sonnet-latest"
@@ -181,6 +186,28 @@ class Settings(BaseSettings):
     #   - xhtml2pdf: 纯 Python 无外部依赖，CSS 支持最有限，但 Windows 上最稳定可用
     PDF_BACKEND: str = "auto"
 
+    # ===== SolidWorks Document Manager API =====
+    # 用于在不安装 SolidWorks 主程序的前提下提取 SLDPRT/SLDASM 预览图
+    # license key 需通过 SolidWorks 客户门户申请（免费，需订阅用户）
+    SW_DOCMGR_LICENSE_KEY: str = ""
+    # SwDocumentMgr.dll 默认路径（SolidWorks 安装后注册到共享目录）
+    SW_DOCMGR_DLL_PATH: str = r"C:\Program Files\Common Files\SOLIDWORKS Shared\SwDocumentMgr.dll"
+
+    # ===== ODA File Converter（DWG → DXF 转换）=====
+    # 外部独立安装（注册下载：https://www.opendesign.com/guestfiles/oda_file_converter）
+    # 推荐 27.1（2026 版，~27MB，AppImage 自带 Qt6 运行时，跨平台兼容性最佳）
+    # 最低 25.x（旧版本在 Linux 上需手动安装 Qt5/Qt6 运行时，且不兼容 DWG 2026）
+    # 未设置时：Windows 由 ezdxf odafc addon 在注册表/默认路径查找；
+    #         Linux/macOS 由 PATH 查找 ODAFileConverter
+    ODAFC_PATH: str = ""
+
+    # ===== eDrawings CLI（SLDPRT/SLDASM 预览图提取 L3a 降级）=====
+    # eDrawings 2026（~200MB，免费，无需 SolidWorks License）
+    # 下载：https://www.edrawingsviewer.com/
+    # 默认安装路径（Windows）：C:\Program Files\Common Files\eDrawings\eDrawings.exe
+    # 由 edrawings_cli.py 包装 C# CLI 工具调用，未设置时跳过此降级
+    EDRAWINGS_PATH: str = ""
+
     @field_validator("PDF_BACKEND")
     @classmethod
     def _validate_pdf_backend(cls, v: str) -> str:
@@ -200,18 +227,6 @@ class Settings(BaseSettings):
         if v_norm not in allowed:
             raise ValueError(
                 f"COMMERCIAL_API_MODE must be one of {sorted(allowed)}, got: {v!r}"
-            )
-        return v_norm
-
-    @field_validator("VLLM_QUANTIZATION")
-    @classmethod
-    def _validate_vllm_quantization(cls, v: str) -> str:
-        # 与 vLLM --quantization 参数对齐
-        allowed = {"", "awq", "gptq", "int8", "fp8", "bitsandbytes"}
-        v_norm = (v or "").strip().lower()
-        if v_norm not in allowed:
-            raise ValueError(
-                f"VLLM_QUANTIZATION must be one of {sorted(allowed)}, got: {v!r}"
             )
         return v_norm
 

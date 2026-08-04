@@ -1,4 +1,4 @@
-"""Anthropic Claude LLM Provider（SubTask 3.4）。
+"""Anthropic Claude LLM Provider（SubTask 3.4 + Task 2.5 适配统一配置）。
 
 官方文档：
 - Messages API: https://docs.anthropic.com/en/api/messages
@@ -32,46 +32,33 @@
 - 优先用 anthropic 官方 SDK（>=0.20）：`from anthropic import Anthropic` + `client.messages.create`
 - SDK 未安装时用 httpx 直接调 REST API 兜底（venv 当前未装 anthropic，走此路径）
 
-配置项（SubTask 3.6 将在 settings 中正式添加，本 subtask 暂用环境变量兜底）：
-- ANTHROPIC_API_KEY
-- ANTHROPIC_BASE_URL（默认 https://api.anthropic.com）
-- ANTHROPIC_MODEL（默认 claude-3-5-sonnet-latest）
-- ANTHROPIC_VLM_MODEL（默认空，决定 is_vlm_available）
+配置来源（Task 2.5）：构造函数接受 ``AIProviderConfig``，从中读取
+``base_url`` / ``api_key``（经 Fernet 解密）/ ``model`` / ``vlm_model``。
+已移除 ``_get_env()`` 混合模式，统一从 config 读取。
 
 降级路径：API Key 未配置或调用失败时返回空 ChatResponse + warning，不抛异常。
 """
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import httpx
 
 from app.logging import get_logger
+from app.security import decrypt_value
 from app.services.ai.base import BaseLLMProvider, ChatMessage, ChatResponse
+from app.services.ai.registry import register_provider
 
 log = get_logger(__name__)
 
-# 默认值
+# 默认值（config 字段缺失或为空时兜底）
 _DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com"
 _DEFAULT_ANTHROPIC_MODEL = "claude-3-5-sonnet-latest"
 _ANTHROPIC_VERSION = "2023-06-01"
 
 
-def _get_env(key: str, default: str = "") -> str:
-    """从环境变量读取配置（SubTask 3.6 后改读 settings）。"""
-    try:
-        from app.config import settings
-
-        val = getattr(settings, key, None)
-        if val:
-            return str(val)
-    except Exception:  # noqa: BLE001
-        pass
-    return os.environ.get(key, default)
-
-
+@register_provider("anthropic")
 class AnthropicProvider(BaseLLMProvider):
     """Anthropic Claude Provider。
 
@@ -79,12 +66,13 @@ class AnthropicProvider(BaseLLMProvider):
     API Key 未配置或调用失败时返回空 ChatResponse。
     """
 
-    def __init__(self) -> None:
-        self._api_key: str = _get_env("ANTHROPIC_API_KEY")
-        self._base_url: str = _get_env("ANTHROPIC_BASE_URL", _DEFAULT_ANTHROPIC_BASE_URL)
-        self._base_url = self._base_url.rstrip("/")
-        self._model: str = _get_env("ANTHROPIC_MODEL", _DEFAULT_ANTHROPIC_MODEL) or _DEFAULT_ANTHROPIC_MODEL
-        self._vlm_model: str = _get_env("ANTHROPIC_VLM_MODEL")
+    def __init__(self, config: Any) -> None:
+        self._api_key: str = decrypt_value(getattr(config, "api_key_encrypted", "") or "")
+        self._base_url: str = (
+            (getattr(config, "base_url", "") or "").rstrip("/") or _DEFAULT_ANTHROPIC_BASE_URL
+        )
+        self._model: str = (getattr(config, "model", "") or "").strip() or _DEFAULT_ANTHROPIC_MODEL
+        self._vlm_model: str = getattr(config, "vlm_model", "") or ""
         self._client: Any | None = None
         self._use_sdk: bool = False
         self._init_error: str | None = None

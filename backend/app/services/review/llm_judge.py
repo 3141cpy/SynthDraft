@@ -1,22 +1,19 @@
-"""LLM 推理模块（SubTask 4.4 主路径）。
+"""LLM 推理模块（SubTask 4.4 主路径，Task 4 统一 provider 访问）。
 
 管线：
 1) retrieve_relevant_clauses()：从语义模型构造查询 → HybridClauseRetriever（Task 3）
-2) llm_judge_defects()：构造 prompt（结构化 JSON + 规范条文）→ Ollama LLM → DefectItem 列表
+2) llm_judge_defects()：构造 prompt（结构化 JSON + 规范条文）
+   → ``get_llm_provider().chat()`` → DefectItem 列表
 
 降级：LLM 不可用时调用 rule_engine_judge()。
 
-Ollama HTTP API：
-- POST /api/chat {"model":"qwen2.5:7b","messages":[...],"stream":false,"format":"json"}
+注意：业务路径统一走 ``get_llm_provider()``，不再直接访问 Ollama HTTP API。
 """
 
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
-
-import httpx
 
 from app.logging import get_logger
 from app.schemas.kb import ClauseSearchResult
@@ -24,50 +21,6 @@ from app.schemas.review_detail import DefectItem, SemanticModel
 from app.services.review.rule_engine import rule_engine_judge
 
 log = get_logger(__name__)
-
-_OLLAMA_DEFAULT_URL = "http://localhost:11434"
-
-# 已知文本 LLM 关键字
-_KNOWN_LLM_KEYWORDS = (
-    "qwen2.5",
-    "qwen2",
-    "llama3",
-    "mistral",
-    "phi3",
-    "gemma",
-    "deepseek",
-    "yi",
-    "baichuan",
-    "chatglm",
-)
-
-# 排除嵌入模型
-_EMBEDDING_MODEL_KEYWORDS = ("nomic-embed-text", "bge-m3", "mxbai-embed")
-
-
-def _get_ollama_url() -> str:
-    """从环境变量或 settings 获取 Ollama URL。"""
-    url = os.environ.get("OLLAMA_HOST_URL") or _OLLAMA_DEFAULT_URL
-    try:
-        from app.config import settings
-
-        url = getattr(settings, "OLLAMA_HOST_URL", url) or url
-    except Exception:  # noqa: BLE001
-        pass
-    return url
-
-
-def list_ollama_models() -> list[str]:
-    """列出 Ollama 中已安装的模型名。"""
-    url = _get_ollama_url().rstrip("/")
-    try:
-        resp = httpx.get(f"{url}/api/tags", timeout=10.0)
-        resp.raise_for_status()
-        data = resp.json()
-        return [m.get("name", "") or m.get("model", "") for m in data.get("models", [])]
-    except Exception as e:  # noqa: BLE001
-        log.warning("review.llm.list_models_failed", error=str(e))
-        return []
 
 
 def is_llm_available() -> bool:
@@ -83,22 +36,6 @@ def is_llm_available() -> bool:
     except Exception as e:  # noqa: BLE001
         log.warning("review.llm.provider_unavailable", error=str(e))
         return False
-
-
-def _pick_llm_model() -> str | None:
-    """[Deprecated] 从已安装模型中挑选首选文本 LLM。
-
-    自 SubTask 3.5 起业务路径改走 ``get_llm_provider().chat()``，
-    本函数保留仅为向后兼容，不再被 llm_judge_defects 调用。
-    """
-    models = list_ollama_models()
-    for m in models:
-        lower = m.lower()
-        if any(kw in lower for kw in _EMBEDDING_MODEL_KEYWORDS):
-            continue
-        if any(kw in lower for kw in _KNOWN_LLM_KEYWORDS):
-            return m
-    return None
 
 
 def retrieve_relevant_clauses(
@@ -284,33 +221,6 @@ def _build_judge_prompt(
         "4. 若图纸完全合规，返回空数组 []"
     )
     return prompt
-
-
-def _ollama_chat(
-    model: str,
-    prompt: str,
-    timeout: float = 180.0,
-) -> str:
-    """[Deprecated] 调用 Ollama /api/chat（纯文本，无图片）。
-
-    使用 format='json' 强制 JSON 输出（若模型支持）。
-
-    自 SubTask 3.5 起业务路径改走 ``get_llm_provider().chat()``，
-    本函数保留仅为向后兼容，不再被 llm_judge_defects 调用。
-    """
-    url = f"{_get_ollama_url().rstrip('/')}/api/chat"
-    payload = {
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "stream": False,
-        "format": "json",
-        "options": {"temperature": 0.2, "top_p": 0.8},
-    }
-    resp = httpx.post(url, json=payload, timeout=timeout)
-    resp.raise_for_status()
-    data = resp.json()
-    msg = data.get("message") or {}
-    return str(msg.get("content", ""))
 
 
 def _parse_defects_from_llm_output(text: str) -> list[DefectItem]:

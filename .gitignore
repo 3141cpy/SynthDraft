@@ -108,24 +108,16 @@ backend/tests/realtest_*.py
 backend/tests/gen_typelib.py
 # 测试输出产物
 solidworks_addin/verify_task*_report.json
-# .trae 迭代过程 spec（仅保留主 spec + coderabbit + 当前 spec）
+
+# ===== .trae spec 文件（全部保留本地，不入库）=====
 .trae/documents/
-.trae/specs/audit-p0p1-and-extend-ai-providers/
-.trae/specs/complete-final-acceptance-and-fix/
-.trae/specs/complete-remaining-test-gaps/
-.trae/specs/execute-comprehensive-v2v4-verification/
-.trae/specs/execute-solidworks-worker-realpath-test/
-.trae/specs/fix-remaining-env-issues-except-remote-vlm/
-.trae/specs/fix-remaining-issues-and-upgrade-to-pass/
-.trae/specs/further-reduce-llm-hallucination/
-.trae/specs/further-reduce-llm-hallucination-v4/
-.trae/specs/implement-solidworks-addin/
-.trae/specs/optimize-llm-prompt-reduce-hallucination/
-.trae/specs/polish-frontend-design-system/
-.trae/specs/polish-frontend-runtime-tests-supplement/
-.trae/specs/proactively-install-missing-deps-and-reverify/
-.trae/specs/realpath-test-backend-api/
-.trae/specs/remediate-audit-gaps-retest/
-.trae/specs/remediate-v2v4-followup-suggestions/
-.trae/specs/retest-vlm-dimension-and-deepseek-collaboration/
-.trae/specs/verify-and-refine-task13-private-deployment/
+.trae/specs/
+
+# ===== 测试样本文件（保留本地，不入库）=====
+/test/
+/test.jpg
+
+# ===== 运行时缓存/测试产物（不入库）=====
+/cache/
+frontend/e2e_screenshots/
+backend/synthdraft_test.db

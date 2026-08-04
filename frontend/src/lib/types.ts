@@ -202,3 +202,68 @@ export interface TaskProgressMessage {
   result?: Record<string, unknown> | null;
   error?: string;
 }
+
+// ===== AI Provider 配置 =====
+// 来源对照：backend/app/schemas/ai_config.py
+// 统一 5 字段结构，所有 provider（本地/远程）一视同仁。
+// split-llm-vlm-config：新增 role 字段区分文本模型与视觉模型配置。
+
+export type ProviderType = "ollama" | "openai_compatible" | "anthropic";
+
+/** 配置角色：llm=文本模型 / vlm=视觉模型。 */
+export type ConfigRole = "llm" | "vlm";
+
+/** Provider 配置响应（api_key 脱敏：有 key 返回 "***"，无 key 返回 ""）。 */
+export interface AIProviderConfig {
+  id: number;
+  name: string;
+  provider_type: ProviderType;
+  base_url: string;
+  api_key: string;
+  model: string;
+  vlm_model: string;
+  /** 配置角色：llm=文本模型 / vlm=视觉模型。 */
+  role: ConfigRole;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** 新增 provider 配置请求体。
+ *
+ * split-llm-vlm-config：``role`` 决定必填字段：
+ * - role="llm"：``model`` 必填，``vlm_model`` 留空
+ * - role="vlm"：``vlm_model`` 必填，``model`` 留空
+ */
+export interface AIProviderConfigCreate {
+  name: string;
+  provider_type: ProviderType;
+  base_url: string;
+  api_key?: string;
+  model: string;
+  vlm_model?: string;
+  role: ConfigRole;
+}
+
+/** 更新 provider 配置请求体（所有字段可选）。
+ *
+ * api_key: undefined 表示不修改，传值（含空串）表示更新。
+ * role 一般不修改（创建后即固定）。
+ */
+export interface AIProviderConfigUpdate {
+  name?: string;
+  provider_type?: ProviderType;
+  base_url?: string;
+  api_key?: string;
+  model?: string;
+  vlm_model?: string;
+  role?: ConfigRole;
+}
+
+/** 测试连接结果。 */
+export interface AIConfigTestResult {
+  available: boolean;
+  vlm_available: boolean;
+  latency_ms: number;
+  error: string;
+}

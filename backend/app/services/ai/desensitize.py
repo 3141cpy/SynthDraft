@@ -306,20 +306,6 @@ def sanitize_messages(messages: list) -> list:
     return new_messages
 
 
-def should_desensitize_for_provider(provider_name: str) -> bool:
-    """判断指定 provider 是否需要脱敏。
-
-    商业 API（openai/anthropic）需要脱敏；本地 provider（ollama/vllm）不需要。
-
-    Args:
-        provider_name: provider 名称（ollama/openai/anthropic/vllm）
-
-    Returns:
-        True 表示需要脱敏
-    """
-    return provider_name.lower() in {"openai", "anthropic"}
-
-
 def self_test() -> dict[str, Any]:
     """self_test：验证脱敏规则覆盖关键场景。"""
     test_cases = [

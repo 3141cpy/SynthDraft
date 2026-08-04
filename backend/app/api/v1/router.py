@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
+    ai_config,
     collaboration,
     generations,
     health,
@@ -20,6 +21,9 @@ from app.api.v1.endpoints import (
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
+api_router.include_router(
+    ai_config.router, prefix="/ai/config", tags=["AI Config"]
+)
 api_router.include_router(reviews.router, prefix="/reviews", tags=["reviews"])
 api_router.include_router(
     generations.router, prefix="/generations", tags=["generations"]

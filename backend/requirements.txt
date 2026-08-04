@@ -94,12 +94,28 @@ cadquery-ocp==7.9.3.1.1
 # 代码中以 try/except 优雅降级（is_solidworks_available() 返回 False）
 pywin32>=308; sys_platform == "win32"
 
+# pythonnet：.NET CLR 桥接，用于 SolidWorks DocMgr API + Shell Thumbnail 路径 B（可选）
+# 路径 A（ctypes 直接调用 IShellItemImageFactory）不依赖 pythonnet，仅用 pywin32+PIL
+# 路径 B（WindowsAPICodePack.Shell.dll）需 pythonnet + 手动部署 DLL
+# 官方文档：https://pythonnet.github.io/
+pythonnet>=3.0; sys_platform == "win32"
+
 # ===== 图像预处理与 OCR 增强（Task 9）=====
 # opencv-python-headless：OpenCV 无 GUI 版，用于去噪/校正/二值化/对比度增强
 # 官方文档：https://docs.opencv.org/
 # 跨平台；headless 版避免 GUI 依赖冲突
 # 代码中以 try/except 优雅降级（is_preprocess_available() 返回 False）
 opencv-python-headless>=4.5
+
+# ===== PDF 图像渲染（VLM OCR 输入，必装）=====
+# pypdfium2：PDF→PIL Image 渲染，供 VLM OCR 流水线使用
+# 官方文档：https://github.com/pypdfium2/pypdfium2
+# 必装依赖（非可选）：review.py PDF 审图路径依赖此包将 PDF 渲染为图像后送 VLM
+# 版本固定到 5.12.1（2026-07-17 最新稳定版，BSD-3-Clause/Apache-2.0）；
+# <6.0 上限锁定主版本，避免 API 破坏性变更。
+# 调研结论（2026-08-02）：5.x 与 4.x API 一致，无需代码改动；
+# PyMuPDF 1.27.x 虽略快但 AGPL-3.0 不可接受，pdf-oxide 不提供位图渲染。
+pypdfium2>=5.12.1,<6.0
 
 # ===== PDF 渲染（HTML→PDF，Task 4.7 report.py）=====
 # playwright：HTML→PDF 渲染后端（Task 4.7 report.py 真实路径之一）
@@ -167,3 +183,11 @@ xhtml2pdf==0.2.17
 paddleocr==3.7.0
 # matplotlib：图表/绘图后端（report.py 图表生成等场景）
 matplotlib==3.11.1
+
+# ===== STEP/IGES 渲染降级方案（可选，P0-4）=====
+# scikit-robot-pyrender：pyrender 的 fork，自动从 OpenGL 4.1→4.0→3.3 降级并启用软件渲染
+# 在 WSL2/无 GPU 服务器上稳定性显著优于原版 pyrender
+# 官方仓库：https://github.com/scikit-robot/scikit-robot-pyrender
+# 与 trimesh 配合使用，作为 OCCT 离屏渲染的降级方案
+# 安装后模块名仍为 pyrender（fork 包名相同），通过 PyPI 包名区分
+scikit-robot-pyrender>=0.2.0; sys_platform == "win32" or sys_platform == "linux"

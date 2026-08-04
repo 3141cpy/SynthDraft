@@ -1,21 +1,19 @@
-"""LLM 生成 CadQuery 代码（SubTask 5.2 + 5.6）。
+"""LLM 生成 CadQuery 代码（SubTask 5.2 + 5.6，Task 4 统一 provider 访问）。
 
-主路径：调用 Ollama ``qwen2.5-coder:7b`` chat API 生成 CadQuery Python 代码。
+主路径：通过 ``get_llm_provider().chat()`` 生成 CadQuery Python 代码
+（provider 类型由数据库激活配置决定，屏蔽 ollama / openai / anthropic 差异）。
 降级路径：LLM 不可用时调用 ``templates.template_match_generate``。
 
 注意（铁律）：
 - ``openai`` 包被 llama-index 降级到 1.x，不可用于 Ollama 调用
-- 优先使用 ``ollama`` Python 包的 ``chat`` API
-- 模型名来自 ``settings.LLM_MODEL``（默认 qwen2.5-coder:7b）
+- 业务路径统一走 ``get_llm_provider()``，不再直接访问 Ollama HTTP 或 ``settings``
 """
 
 from __future__ import annotations
 
 import re
 import time
-from typing import Any
 
-from app.config import settings
 from app.logging import get_logger
 from app.services.generation.prompts import (
     BUILD_STEPS_PROMPT_TEMPLATE,
@@ -39,44 +37,6 @@ _PYTHON_BLOCK_RE = re.compile(
     r"```(?:python|py)?\s*\n(.*?)\n```",
     re.DOTALL,
 )
-
-
-# ===== Ollama 客户端（懒加载）=====
-# 注意：自 SubTask 3.5 起，业务路径统一改走 app.services.ai.get_llm_provider()。
-# 以下 _get_ollama_client / _ollama_* 缓存变量保留仅供向后兼容与潜在外部调用，
-# 不再被 generate_cadquery_code / apply_multi_turn_edit 使用。
-
-_ollama_client: Any = None
-_ollama_checked: bool = False
-_ollama_available: bool = False
-
-
-def _get_ollama_client() -> Any:
-    """[Deprecated] 懒加载 ollama Python 客户端，返回 None 表示不可用。
-
-    自 SubTask 3.5 起业务路径改走 ``get_llm_provider().chat()``，
-    本函数保留仅为向后兼容，不再被 generate / multi_turn 路径调用。
-    """
-    global _ollama_client, _ollama_checked, _ollama_available
-    if _ollama_checked:
-        return _ollama_client if _ollama_available else None
-    _ollama_checked = True
-    try:
-        import ollama  # type: ignore[import-not-found]
-
-        # 通过 list() 探测服务可达性
-        client = ollama.Client(host=settings.OLLAMA_HOST_URL)
-        _ollama_client = client
-        _ollama_available = True
-        log.info(
-            "ollama.client.loaded",
-            host=settings.OLLAMA_HOST_URL,
-        )
-        return client
-    except Exception as e:  # noqa: BLE001
-        _ollama_available = False
-        log.warning("ollama.client.unavailable", error=str(e))
-        return None
 
 
 def is_llm_available() -> bool:

@@ -29,8 +29,12 @@ from app.services.cad.dxf_parser import parse_dxf_to_intermediate
 
 log = get_logger(__name__)
 
-# 渲染图片默认输出目录（相对 backend/）
-_DEFAULT_IMAGE_DIR = Path("./tmp_review_images")
+
+def _get_default_image_dir() -> Path:
+    """从配置读取渲染图片默认输出目录。"""
+    from app.config import settings
+
+    return Path(settings.REVIEW_IMAGE_DIR)
 
 
 def render_dxf_to_image(
@@ -42,7 +46,7 @@ def render_dxf_to_image(
 
     Args:
         dxf_path: DXF 文件路径
-        output_path: 输出 PNG 路径；None 则生成在 _DEFAULT_IMAGE_DIR 下，
+        output_path: 输出 PNG 路径；None 则生成在 REVIEW_IMAGE_DIR 配置目录下，
             文名与 DXF 同名 + .png
         dpi: 渲染分辨率
 
@@ -54,8 +58,9 @@ def render_dxf_to_image(
     """
     dxf_path = Path(dxf_path)
     if output_path is None:
-        _DEFAULT_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
-        output_path = _DEFAULT_IMAGE_DIR / f"{dxf_path.stem}.png"
+        image_dir = _get_default_image_dir()
+        image_dir.mkdir(parents=True, exist_ok=True)
+        output_path = image_dir / f"{dxf_path.stem}.png"
     else:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -106,7 +111,7 @@ def render_dxf_to_image(
     return output_path
 
 
-def _make_fig():
+def _make_fig() -> tuple[Any, Any]:
     """创建 matplotlib figure/axes（隔离以便测试 mock）。"""
     import matplotlib.pyplot as plt
 
@@ -115,31 +120,61 @@ def _make_fig():
     return fig, ax
 
 
-def prepare_review_context(dxf_path: Path) -> ReviewContext:
-    """准备审图上下文：解析 DXF + 渲染图片。
+def prepare_review_context(file_path: Path) -> ReviewContext:
+    """准备审图上下文：按文件类型分流处理。
 
-    解析失败时抛出 CADParseError（来自 Task 2）；
-    渲染失败时仅记录 warning，image_path 置 None（不阻断审图）。
+    - DXF 文件：解析 + 渲染图片
+    - 图片文件（JPG/PNG）：跳过 CAD 解析，直接使用图片路径
+    - PDF 文件：渲染为 PNG 后复用 image 路径
+    - DWG 文件：经 ODA File Converter 转 DXF 后复用 DXF 管线
+    - 其他类型：抛出 ValueError
 
     Args:
-        dxf_path: DXF 文件路径
+        file_path: 输入文件路径
 
     Returns:
         ReviewContext
     """
-    dxf_path = Path(dxf_path)
+    file_path = Path(file_path)
+    suffix = file_path.suffix.lower()
+
+    if suffix == ".dxf":
+        return _build_dxf_context(file_path)
+    if suffix in (".jpg", ".jpeg", ".png"):
+        return _build_image_context(file_path)
+    if suffix == ".pdf":
+        return _build_pdf_context(file_path)
+    if suffix == ".dwg":
+        return _build_dwg_context(file_path)
+    if suffix == ".sldprt":
+        return _build_sldprt_context(file_path)
+    if suffix == ".sldasm":
+        return _build_sldasm_context(file_path)
+    if suffix in (".step", ".stp"):
+        return _build_step_context(file_path)
+    if suffix in (".iges", ".igs"):
+        return _build_iges_context(file_path)
+    raise ValueError(f"暂不支持的文件类型: {suffix}")
+
+
+def _build_dxf_context(file_path: Path) -> ReviewContext:
+    """DXF 文件审图上下文：解析 + 渲染图片。
+
+    解析失败时抛出 CADParseError（来自 Task 2）；
+    渲染失败时仅记录 warning，image_path 置 None（不阻断审图）。
+    """
     t0 = time.perf_counter()
 
-    cad_model = parse_dxf_to_intermediate(dxf_path)
+    cad_model = parse_dxf_to_intermediate(file_path)
 
     image_path: str | None = None
     render_error: str | None = None
     try:
-        png = render_dxf_to_image(dxf_path)
+        png = render_dxf_to_image(file_path)
         image_path = str(png)
     except Exception as e:
         render_error = str(e)
-        log.warning("review.render.failed", dxf=str(dxf_path), error=render_error)
+        log.warning("review.render.failed", dxf=str(file_path), error=render_error)
 
     elapsed_ms = int((time.perf_counter() - t0) * 1000)
     metadata: dict[str, Any] = {
@@ -152,8 +187,365 @@ def prepare_review_context(dxf_path: Path) -> ReviewContext:
     }
 
     return ReviewContext(
-        source_file=str(dxf_path.resolve()),
+        source_file=str(file_path.resolve()),
         source_format=cad_model.source_format,
+        cad_model=cad_model,
+        image_path=image_path,
+        parse_metadata=metadata,
+    )
+
+
+def _build_image_context(file_path: Path) -> ReviewContext:
+    """构造图片文件的审图上下文：跳过 CAD 解析，直接使用图片路径。"""
+    t0 = time.perf_counter()
+    cad_model = CADIntermediateModel(
+        source_file=str(file_path.resolve()),
+        source_format="image",
+        metadata={"source_type": "image"},
+    )
+    elapsed_ms = int((time.perf_counter() - t0) * 1000)
+    metadata: dict[str, Any] = {
+        "prepare_elapsed_ms": elapsed_ms,
+        "source_type": "image",
+        "entity_count": 0,
+        "dimension_count": 0,
+        "layer_count": 0,
+        "has_title_block": False,
+    }
+    return ReviewContext(
+        source_file=str(file_path.resolve()),
+        source_format="image",
+        cad_model=cad_model,
+        image_path=str(file_path),
+        parse_metadata=metadata,
+    )
+
+
+def _build_pdf_context(file_path: Path) -> ReviewContext:
+    """构造 PDF 文件的审图上下文：渲染为 PNG 后复用 image 路径。
+
+    PDF 不含矢量实体，仅渲染为位图供 VLM 识别；
+    渲染失败时仅记录 warning，image_path 置 None（不阻断审图）。
+    """
+    from app.services.review.pdf_renderer import render_pdf_to_image
+
+    t0 = time.perf_counter()
+    image_path: str | None = None
+    render_error: str | None = None
+    try:
+        output_png = str(file_path.with_suffix(".png"))
+        image_path = render_pdf_to_image(file_path, output_path=output_png)
+        log.info("review.pipeline.pdf_rendered", pdf=str(file_path), png=image_path)
+    except ValueError as e:
+        render_error = str(e)
+        log.warning(
+            "review.pipeline.pdf_render_failed",
+            pdf=str(file_path),
+            error=render_error,
+        )
+
+    cad_model = CADIntermediateModel(
+        source_file=str(file_path.resolve()),
+        source_format="image",
+        metadata={"source_type": "pdf"},
+    )
+    elapsed_ms = int((time.perf_counter() - t0) * 1000)
+    metadata: dict[str, Any] = {
+        "prepare_elapsed_ms": elapsed_ms,
+        "source_type": "pdf",
+        "render_error": render_error,
+        "entity_count": 0,
+        "dimension_count": 0,
+        "layer_count": 0,
+        "has_title_block": False,
+    }
+    return ReviewContext(
+        source_file=str(file_path.resolve()),
+        source_format="image",
+        cad_model=cad_model,
+        image_path=image_path,
+        parse_metadata=metadata,
+    )
+
+
+def _build_dwg_context(file_path: Path) -> ReviewContext:
+    """DWG 文件审图上下文：先转 DXF，再复用 DXF 解析与渲染管线。
+
+    依赖 ODA File Converter（外部二进制）。不可用时抛 DependencyMissingError。
+    临时 DXF 文件在 TemporaryDirectory 退出时自动清理；
+    渲染产出的 PNG 持久化在 REVIEW_IMAGE_DIR 配置目录，供后续审图使用。
+    """
+    from app.services.cad import is_odafc_available, dwg_to_dxf
+    from app.services.review.dependency_check import DependencyMissingError
+
+    if not is_odafc_available():
+        raise DependencyMissingError(
+            dependency_name="ODA File Converter",
+            install_hint="请从 https://www.opendesign.com/guestfiles/oda_file_converter 下载安装，"
+            "并设置环境变量 ODAFC_PATH 指向 ODAFileConverter.exe 路径",
+            file_type="dwg",
+        )
+
+    import tempfile
+
+    t0 = time.perf_counter()
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        # DWG → DXF（临时目录，退出 with 时清理）
+        dxf_path = dwg_to_dxf(file_path, output_dir=Path(tmp_dir))
+
+        # 复用 DXF 解析
+        cad_model = parse_dxf_to_intermediate(dxf_path)
+        # 覆写来源标注：原始文件是 DWG，而非解析器默认的 dxf
+        cad_model.source_format = "dwg"
+        cad_model.source_file = str(file_path.resolve())
+
+        # 复用 DXF 渲染（PNG 输出到 REVIEW_IMAGE_DIR 配置目录，不在临时目录内）
+        image_path: str | None = None
+        render_error: str | None = None
+        try:
+            png = render_dxf_to_image(dxf_path)
+            image_path = str(png)
+        except Exception as e:
+            render_error = str(e)
+            log.warning("review.render.failed", dxf=str(dxf_path), error=render_error)
+
+    elapsed_ms = int((time.perf_counter() - t0) * 1000)
+    metadata: dict[str, Any] = {
+        "prepare_elapsed_ms": elapsed_ms,
+        "render_error": render_error,
+        "entity_count": len(cad_model.entities),
+        "dimension_count": len(cad_model.dimensions),
+        "layer_count": len(cad_model.layers),
+        "has_title_block": cad_model.title_block is not None,
+        "original_dwg_path": str(file_path.resolve()),
+        "conversion_note": "DWG→DXF via ODA",
+    }
+
+    return ReviewContext(
+        source_file=str(file_path.resolve()),
+        source_format="dwg",
+        cad_model=cad_model,
+        image_path=image_path,
+        parse_metadata=metadata,
+    )
+
+
+def _build_sldprt_context(file_path: Path) -> ReviewContext:
+    """SLDPRT 文件审图上下文：多级降级提取 PNG 预览图。"""
+    return _build_solidworks_context(file_path, "sldprt")
+
+
+def _build_sldasm_context(file_path: Path) -> ReviewContext:
+    """SLDASM 文件审图上下文：多级降级提取 PNG 预览图。"""
+    return _build_solidworks_context(file_path, "sldasm")
+
+
+def _build_solidworks_context(file_path: Path, source_format: str) -> ReviewContext:
+    """SolidWorks 文件审图上下文：多级降级提取 PNG。
+
+    降级链路因文件类型而异（关键差异：eDrawings OCX 加载 SLDASM 时崩溃，
+    但加载 SLDPRT 正常且分辨率高于 Shell Thumbnail）：
+
+    SLDPRT（OCX 不崩溃，L3a 分辨率 ~10KB 高于 L2 ~5KB）:
+      L1 sw_docmgr → L3a edrawings_cli（优先，高分辨率）→ L2 shell_thumbnail → L3b solidworks_com
+
+    SLDASM（eDrawings OCX 崩溃，跳过 L3a）:
+      L1 sw_docmgr → L2 shell_thumbnail（优先）→ L3b solidworks_com
+
+    L3b SolidWorks COM 暂未实现（reader 无 PNG 导出能力），留待扩展。
+    全失败 → image_path=None（不阻断审图，VLM 降级）。
+
+    Args:
+        file_path: SLDPRT/SLDASM 文件路径
+        source_format: "sldprt" 或 "sldasm"
+    """
+    from app.services.review.dependency_check import (
+        is_edrawings_available,
+        is_shell_thumbnail_available,
+        is_solidworks_available,
+        is_sw_docmgr_available,
+    )
+
+    t0 = time.perf_counter()
+    image_path: str | None = None
+    render_error: str | None = None
+    renderer_used: str | None = None
+
+    output_png = str(file_path.with_suffix(".png"))
+
+    def _try_docmgr() -> str | None:
+        from app.services.solidworks.docmgr_renderer import (
+            render_sldprt_via_docmgr,
+        )
+
+        return render_sldprt_via_docmgr(file_path, output_png)
+
+    def _try_edrawings() -> str | None:
+        from app.services.solidworks.edrawings_cli import (
+            render_sldprt_via_edrawings,
+        )
+
+        return render_sldprt_via_edrawings(file_path, output_png)
+
+    def _try_shell() -> str | None:
+        from app.services.solidworks.shell_thumbnail_renderer import (
+            render_sldprt_via_shell,
+        )
+
+        return render_sldprt_via_shell(file_path, output_png)
+
+    # 根据文件类型构建降级链路顺序
+    # SLDPRT: OCX 不崩溃，L3a edrawings_cli 分辨率(~10KB)高于 L2 shell_thumbnail(~5KB)，优先 L3a
+    # SLDASM: eDrawings OCX 加载 SLDASM 时崩溃，跳过 L3a，直接用 L2 shell_thumbnail
+    if source_format == "sldasm":
+        # SLDASM: L1 → L2 → L3b（跳过 L3a，OCX 崩溃）
+        chain = [
+            ("sw_docmgr", is_sw_docmgr_available, _try_docmgr),
+            ("shell_thumbnail", is_shell_thumbnail_available, _try_shell),
+            ("solidworks_com", is_solidworks_available, None),
+        ]
+    else:
+        # SLDPRT: L1 → L3a → L2 → L3b（L3a 分辨率高于 L2）
+        chain = [
+            ("sw_docmgr", is_sw_docmgr_available, _try_docmgr),
+            ("edrawings_cli", is_edrawings_available, _try_edrawings),
+            ("shell_thumbnail", is_shell_thumbnail_available, _try_shell),
+            ("solidworks_com", is_solidworks_available, None),
+        ]
+
+    for name, check_fn, render_fn in chain:
+        if image_path is not None:
+            break
+        if not check_fn():
+            continue
+        if render_fn is None:
+            # L3b solidworks_com：reader 无 PNG 导出能力，暂跳过
+            log.debug(
+                "review.pipeline.solidworks_com_skipped",
+                file=str(file_path),
+                reason="reader 无 PNG 导出能力",
+            )
+            continue
+        try:
+            result = render_fn()
+            if result:
+                image_path = result
+                renderer_used = name
+        except Exception as e:
+            log.warning(
+                "review.pipeline.render_failed",
+                renderer=name,
+                file=str(file_path),
+                error=str(e),
+            )
+
+    # 全失败
+    if image_path is None:
+        render_error = "所有 SolidWorks 渲染方案均不可用"
+
+    elapsed_ms = int((time.perf_counter() - t0) * 1000)
+    metadata: dict[str, Any] = {
+        "prepare_elapsed_ms": elapsed_ms,
+        "render_error": render_error,
+        "renderer": renderer_used,
+        "source_file": str(file_path.resolve()),
+    }
+
+    cad_model = CADIntermediateModel(
+        source_file=str(file_path.resolve()),
+        source_format=source_format,  # type: ignore[arg-type]
+    )
+    return ReviewContext(
+        source_file=str(file_path.resolve()),
+        source_format=source_format,  # type: ignore[arg-type]
+        cad_model=cad_model,
+        image_path=image_path,
+        parse_metadata=metadata,
+    )
+
+
+def _build_step_context(file_path: Path) -> ReviewContext:
+    """STEP 文件审图上下文：OCCT 加载 + 离屏渲染为 PNG。"""
+    return _build_3d_context(file_path, "step")
+
+
+def _build_iges_context(file_path: Path) -> ReviewContext:
+    """IGES 文件审图上下文：OCCT 加载 + 离屏渲染为 PNG。"""
+    return _build_3d_context(file_path, "iges")
+
+
+def _build_3d_context(file_path: Path, source_format: str) -> ReviewContext:
+    """3D CAD 文件（STEP/IGES）审图上下文：OCCT 加载 + 渲染为 PNG。
+
+    渲染降级链路：OCCT 离屏 → trimesh+pyrender → image_path=None（不阻断审图）
+    """
+    from app.services.cad import read_iges_file, read_step_file
+
+    t0 = time.perf_counter()
+
+    # 加载 3D 模型（read_*_file 返回 dict，shape 在 "shape" 键）
+    if source_format == "step":
+        result = read_step_file(file_path)
+    else:
+        result = read_iges_file(file_path)
+    shape = result["shape"]
+
+    # 渲染为 PNG
+    image_path: str | None = None
+    render_error: str | None = None
+    renderer_used: str | None = None
+
+    output_png = str(file_path.with_suffix(".png"))
+
+    # 尝试 OCCT 离屏渲染
+    try:
+        from app.services.cad.occ_engine import OCCTRenderError, render_to_png
+
+        render_to_png(shape, output_png)
+        image_path = output_png
+        renderer_used = "occt_offscreen"
+    except OCCTRenderError as e:
+        log.warning(
+            "review.pipeline.occt_render_failed",
+            file=str(file_path),
+            error=str(e),
+        )
+        # 降级到 trimesh+pyrender
+        try:
+            from app.services.review.step_renderer import render_via_trimesh
+
+            render_via_trimesh(shape, output_png)
+            image_path = output_png
+            renderer_used = "trimesh_pyrender"
+        except Exception as e2:
+            render_error = str(e2)
+            log.warning(
+                "review.pipeline.trimesh_render_failed",
+                file=str(file_path),
+                error=str(e2),
+            )
+    except Exception as e:
+        render_error = str(e)
+        log.warning(
+            "review.pipeline.render_failed", file=str(file_path), error=str(e)
+        )
+
+    elapsed_ms = int((time.perf_counter() - t0) * 1000)
+    metadata: dict[str, Any] = {
+        "prepare_elapsed_ms": elapsed_ms,
+        "render_error": render_error,
+        "renderer": renderer_used,
+        "source_file": str(file_path.resolve()),
+    }
+
+    cad_model = CADIntermediateModel(
+        source_file=str(file_path.resolve()),
+        source_format=source_format,  # type: ignore[arg-type]
+    )
+    return ReviewContext(
+        source_file=str(file_path.resolve()),
+        source_format=source_format,  # type: ignore[arg-type]
         cad_model=cad_model,
         image_path=image_path,
         parse_metadata=metadata,

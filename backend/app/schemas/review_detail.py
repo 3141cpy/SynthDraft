@@ -38,7 +38,7 @@ class ReviewContext(BaseModel):
     """
 
     source_file: str = Field(..., description="源文件绝对路径")
-    source_format: Literal["dxf", "dwg", "step", "iges", "unknown"] = Field(
+    source_format: Literal["dxf", "dwg", "step", "iges", "image", "sldprt", "sldasm", "unknown"] = Field(
         default="unknown", description="源文件格式"
     )
     cad_model: CADIntermediateModel = Field(

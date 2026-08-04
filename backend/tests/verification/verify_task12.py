@@ -161,16 +161,16 @@ def test_12_1_sketch_parser(sketch_path: Path) -> dict[str, Any]:
     """SubTask 12.1：VLM 草图解析（parse_sketch）。"""
     section("SubTask 12.1 实测：VLM 草图解析（parse_sketch）")
     from app.services.generation.sketch_parser import parse_sketch
-    from app.services.review.vlm_ocr import _pick_vlm_model
+    from app.services.review.vlm_ocr import is_vlm_available
 
-    # 探测 VLM 可用性
+    # 探测 VLM 可用性（统一走 provider 抽象，不再直接探测 Ollama 模型列表）
     try:
-        vlm_model = _pick_vlm_model()
+        vlm_available = is_vlm_available()
     except Exception as e:  # noqa: BLE001
-        vlm_model = None
+        vlm_available = False
         _info(f"VLM 探测异常: {e}")
 
-    _info(f"VLM 可用性: {bool(vlm_model)}, model={vlm_model or 'N/A'}")
+    _info(f"VLM 可用性: {vlm_available}")
 
     parse_result = parse_sketch(sketch_path)
     _info(
@@ -181,14 +181,22 @@ def test_12_1_sketch_parser(sketch_path: Path) -> dict[str, Any]:
     )
 
     # 验证 1：返回结构合法
-    check(
-        parse_result.vlm_model == (vlm_model or ""),
-        "返回的 vlm_model 与探测一致",
-        f"actual={parse_result.vlm_model!r}, expected={vlm_model!r}",
-    )
+    # VLM 可用时 parse_result.vlm_model 应非空；不可用时可为空
+    if vlm_available:
+        check(
+            bool(parse_result.vlm_model),
+            "VLM 可用时返回的 vlm_model 非空",
+            f"actual={parse_result.vlm_model!r}",
+        )
+    else:
+        check(
+            not parse_result.vlm_model,
+            "VLM 不可用时 vlm_model 为空",
+            f"actual={parse_result.vlm_model!r}",
+        )
 
     # 验证 2：VLM 可用时有 features；不可用时降级路径返回空 + warning
-    if vlm_model:
+    if vlm_available:
         check(
             len(parse_result.features) >= 0,
             "VLM 可用时返回 features 列表（数量可能为 0）",

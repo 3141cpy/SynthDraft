@@ -1,4 +1,4 @@
-"""Ollama Provider 实现（SubTask 3.2）。
+"""Ollama Provider 实现（SubTask 3.2 + Task 2.3 适配统一配置）。
 
 复用 ``vlm_ocr.py`` 的 ``list_ollama_models`` / ``_pick_vlm_model`` 逻辑，
 复用 ``code_generator.py`` 的 ``is_llm_available`` 探测逻辑。
@@ -8,12 +8,15 @@
 - ``chat_with_image()``：使用 ``httpx`` 直接调 Ollama ``/api/chat`` HTTP API
   （与 ``vlm_ocr._ollama_chat_with_image`` 一致），便于控制 timeout 与错误处理
 
+配置来源（Task 2.3）：构造函数接受 ``AIProviderConfig``，从中读取
+``base_url`` / ``model`` / ``vlm_model``。``vlm_model`` 留空时沿用自动探测
+（``_pick_vlm_model`` 扫描已安装模型），保持与旧行为一致。
+
 降级策略：服务不可达或模型未拉取时返回空 ``ChatResponse`` + warning 日志，不抛异常。
 
 注意（铁律）：
 - ``openai`` 包被 llama-index 降级到 1.x，不可用于 Ollama 调用
-- 关键参数从 ``settings`` 读取：``OLLAMA_HOST_URL`` / ``LLM_MODEL``
-- 不读 ``settings.VLM_MODEL``：Ollama 路径靠 ``_pick_vlm_model`` 自动探测已安装的视觉模型
+- 不再读 ``settings.VLM_MODEL``：显式 ``config.vlm_model`` 优先，否则自动探测
 """
 
 from __future__ import annotations
@@ -22,9 +25,9 @@ from typing import Any
 
 import httpx
 
-from app.config import settings
 from app.logging import get_logger
 from app.services.ai.base import BaseLLMProvider, ChatMessage, ChatResponse
+from app.services.ai.registry import register_provider
 
 log = get_logger(__name__)
 
@@ -51,12 +54,15 @@ _VLM_PREFERENCE = (
 )
 
 
-def _list_ollama_models() -> list[str]:
+def _list_ollama_models(base_url: str) -> list[str]:
     """列出 Ollama 中已安装的模型名（通过 GET /api/tags）。
 
     与 ``vlm_ocr.list_ollama_models`` 一致，复刻以保持 provider 自洽。
+    ``base_url`` 由调用方传入（来自 ``AIProviderConfig.base_url``）。
     """
-    url = settings.OLLAMA_HOST_URL.rstrip("/")
+    url = (base_url or "").rstrip("/")
+    if not url:
+        return []
     try:
         resp = httpx.get(f"{url}/api/tags", timeout=10.0)
         resp.raise_for_status()
@@ -67,12 +73,12 @@ def _list_ollama_models() -> list[str]:
         return []
 
 
-def _pick_vlm_model() -> str | None:
+def _pick_vlm_model(base_url: str) -> str | None:
     """从已安装模型中挑选首选视觉模型。
 
     与 ``vlm_ocr._pick_vlm_model`` 一致：先按优先级顺序匹配，再按关键字兜底。
     """
-    models = _list_ollama_models()
+    models = _list_ollama_models(base_url)
     if not models:
         return None
     lower_models = [m.lower() for m in models]
@@ -88,14 +94,30 @@ def _pick_vlm_model() -> str | None:
     return None
 
 
+def _model_matches(target: str, available: list[str]) -> bool:
+    """宽松匹配模型名（兼容 ``:latest`` 后缀与前缀匹配，与旧 is_available 一致）。"""
+    if not target:
+        return False
+    variants = {target, f"{target}:latest"}
+    return any(n in variants or n.startswith(target) for n in available)
+
+
 # ===== OllamaProvider =====
 
 
+@register_provider("ollama")
 class OllamaProvider(BaseLLMProvider):
-    """Ollama Provider：通过本地 Ollama 服务调用 LLM/VLM。"""
+    """Ollama Provider：通过本地 Ollama 服务调用 LLM/VLM。
 
-    def __init__(self) -> None:
+    配置经 ``AIProviderConfig`` 注入：``base_url`` / ``model`` / ``vlm_model``。
+    ``vlm_model`` 留空时自动探测已安装的视觉模型。
+    """
+
+    def __init__(self, config: Any) -> None:
         # 客户端懒加载缓存（与 code_generator._ollama_client 模式一致）
+        self._base_url: str = (getattr(config, "base_url", "") or "").rstrip("/") or "http://localhost:11434"
+        self._model: str = getattr(config, "model", "") or ""
+        self._vlm_model: str = getattr(config, "vlm_model", "") or ""
         self._client: Any = None
         self._client_checked: bool = False
         self._client_available: bool = False
@@ -112,12 +134,12 @@ class OllamaProvider(BaseLLMProvider):
         try:
             import ollama  # type: ignore[import-not-found]
 
-            client = ollama.Client(host=settings.OLLAMA_HOST_URL)
+            client = ollama.Client(host=self._base_url)
             # 通过 list() 探测服务可达性（触发实际 HTTP 请求）
             client.list()
             self._client = client
             self._client_available = True
-            log.info("ai.ollama.client.loaded", host=settings.OLLAMA_HOST_URL)
+            log.info("ai.ollama.client.loaded", host=self._base_url)
             return client
         except Exception as e:  # noqa: BLE001
             self._client_available = False
@@ -127,7 +149,7 @@ class OllamaProvider(BaseLLMProvider):
     # ===== 可用性检测 =====
 
     def is_available(self) -> bool:
-        """检测文本 LLM 是否可用（Ollama 可达 + ``LLM_MODEL`` 已拉取）。
+        """检测文本 LLM 是否可用（Ollama 可达 + 配置模型已拉取）。
 
         与 ``code_generator.is_llm_available`` 一致：
         兼容 ollama 0.6.x 的 ModelList 对象 / dict 两种返回，
@@ -149,10 +171,8 @@ class OllamaProvider(BaseLLMProvider):
                     name = m.get("model") or m.get("name")
                 if name:
                     available_names.append(str(name))
-            target = settings.LLM_MODEL
-            # 兼容 :latest 后缀
-            target_variants = {target, f"{target}:latest"}
-            ok = any(n in target_variants or n.startswith(target) for n in available_names)
+            target = self._model
+            ok = _model_matches(target, available_names)
             if not ok:
                 log.warning(
                     "ai.ollama.llm_model.not_pulled",
@@ -165,11 +185,14 @@ class OllamaProvider(BaseLLMProvider):
             return False
 
     def is_vlm_available(self) -> bool:
-        """检测视觉 VLM 是否可用（已安装模型名匹配 VLM 关键字）。
+        """检测视觉 VLM 是否可用。
 
-        与 ``vlm_ocr.is_vlm_available`` 一致。
+        显式 ``config.vlm_model`` 配置时校验其已安装；留空时按关键字自动探测
+        （与 ``vlm_ocr.is_vlm_available`` 一致）。
         """
-        models = _list_ollama_models()
+        models = _list_ollama_models(self._base_url)
+        if self._vlm_model:
+            return _model_matches(self._vlm_model, models)
         for m in models:
             lower = m.lower()
             if any(kw in lower for kw in _KNOWN_VLM_KEYWORDS):
@@ -193,7 +216,7 @@ class OllamaProvider(BaseLLMProvider):
         client = self._get_client()
         if client is None:
             log.warning("ai.ollama.chat.skipped", reason="client_unavailable")
-            return ChatResponse(content="", model=settings.LLM_MODEL)
+            return ChatResponse(content="", model=self._model)
 
         # ChatMessage -> ollama messages dict
         ollama_messages: list[dict[str, Any]] = []
@@ -205,7 +228,7 @@ class OllamaProvider(BaseLLMProvider):
 
         try:
             resp = client.chat(
-                model=settings.LLM_MODEL,
+                model=self._model,
                 messages=ollama_messages,
                 options={
                     "temperature": temperature,
@@ -213,10 +236,10 @@ class OllamaProvider(BaseLLMProvider):
                     "top_p": 0.9,
                 },
             )
-            return _parse_chat_response(resp, settings.LLM_MODEL)
+            return _parse_chat_response(resp, self._model)
         except Exception as e:  # noqa: BLE001
             log.warning("ai.ollama.chat.failed", error=str(e))
-            return ChatResponse(content="", model=settings.LLM_MODEL)
+            return ChatResponse(content="", model=self._model)
 
     def stream_chat(
         self,
@@ -243,7 +266,7 @@ class OllamaProvider(BaseLLMProvider):
             ollama_messages.append(msg)
         try:
             stream = client.chat(
-                model=settings.LLM_MODEL,
+                model=self._model,
                 messages=ollama_messages,
                 stream=True,
                 options={
@@ -278,11 +301,11 @@ class OllamaProvider(BaseLLMProvider):
         与 ``vlm_ocr._ollama_chat_with_image`` 一致：使用 ``httpx`` 直接调 HTTP API，
         messages 中 user content 含 ``images`` 字段。
 
-        模型选择靠 ``_pick_vlm_model`` 自动探测，不读 ``settings.VLM_MODEL``。
+        模型选择：显式 ``config.vlm_model`` 优先，否则靠 ``_pick_vlm_model`` 自动探测。
 
         降级：无可用 VLM 模型或调用失败时返回空 ``ChatResponse``，不抛异常。
         """
-        model = _pick_vlm_model()
+        model = self._vlm_model or _pick_vlm_model(self._base_url)
         if not model:
             log.warning("ai.ollama.chat_with_image.skipped", reason="no_vlm_model")
             return ChatResponse(content="", model="")
@@ -301,7 +324,7 @@ class OllamaProvider(BaseLLMProvider):
                 msg["images"] = m.images
             ollama_messages.append(msg)
 
-        url = f"{settings.OLLAMA_HOST_URL.rstrip('/')}/api/chat"
+        url = f"{self._base_url.rstrip('/')}/api/chat"
         payload: dict[str, Any] = {
             "model": model,
             "messages": ollama_messages,
@@ -358,9 +381,16 @@ def _parse_chat_response(resp: Any, model: str) -> ChatResponse:
             except Exception:  # noqa: BLE001
                 raw = None
 
+    # 优先用 API 响应回显的 model，回退到传入的 config model
+    if isinstance(resp, dict):
+        resp_model = resp.get("model") or ""
+    else:
+        resp_model = getattr(resp, "model", "") or ""
+    actual_model = resp_model if resp_model else model
+
     return ChatResponse(
         content=content or "",
-        model=model,
+        model=actual_model,
         usage=usage,
         raw=raw,
     )

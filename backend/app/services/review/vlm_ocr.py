@@ -1,14 +1,16 @@
-"""VLM（视觉语言模型）OCR 模块（SubTask 4.2）。
+"""VLM（视觉语言模型）OCR 模块（SubTask 4.2，Task 4 统一 provider 访问）。
 
 P0 阶段降级策略：
-- 优先使用 Ollama 中的视觉模型（minicpm-v / llava 等）
+- 优先使用 ``get_vlm_provider().chat_with_image()`` 调用视觉模型
+  （provider 类型由数据库激活配置决定，屏蔽 ollama / openai / anthropic 差异）
 - VLM 不可用时返回空 dict，pipeline 标注 review_mode="vector_only"
 
-Ollama Python 客户端 API：
-    import ollama
-    ollama.chat(model='minicpm-v', messages=[{'role':'user','content':'...','images':[b64]}])
+split-llm-vlm-config：本模块所有调用统一走 ``get_vlm_provider()``，与
+``get_llm_provider()`` 完全解耦——视觉模型配置独立激活与管理。
 
-官方文档：https://github.com/ollama/ollama-python
+注意：本模块仅保留 OCR 预处理（图像降采样 / 编码）与 VLM 调用重试逻辑。
+VLM 模型选择 / HTTP 调用已下沉到 ``OllamaProvider.chat_with_image`` 等 provider
+实现中，本模块不再直接访问 Ollama HTTP API。
 """
 
 from __future__ import annotations
@@ -16,7 +18,6 @@ from __future__ import annotations
 import base64
 import io
 import json
-import os
 import time
 from pathlib import Path
 from typing import Any
@@ -27,88 +28,24 @@ from app.logging import get_logger
 
 log = get_logger(__name__)
 
-# 默认 Ollama URL（与 embedder 保持一致）
-_OLLAMA_DEFAULT_URL = "http://localhost:11434"
-
-# 已知视觉模型关键字（用于 ollama list 匹配）
-_KNOWN_VLM_KEYWORDS = (
-    "minicpm-v",
-    "llava",
-    "qwen2.5-vl",  # 暂未在 Ollama 官方库，预留
-    "qwen2-vl",
-    "llama3.2-vision",
-    "moondream",
-)
-
-# 已知视觉模型的优先级顺序（首个可用者使用）
-_VLM_PREFERENCE = (
-    "minicpm-v",
-    "llava:7b",
-    "llava:13b",
-    "llava",
-    "moondream",
-)
-
-
-def _get_ollama_url() -> str:
-    """从环境变量或 settings 获取 Ollama URL。"""
-    url = os.environ.get("OLLAMA_HOST_URL") or _OLLAMA_DEFAULT_URL
-    try:
-        from app.config import settings
-
-        url = getattr(settings, "OLLAMA_HOST_URL", url) or url
-    except Exception:  # noqa: BLE001
-        pass
-    return url
-
-
-def list_ollama_models() -> list[str]:
-    """列出 Ollama 中已安装的模型名。
-
-    通过 GET /api/tags 获取。
-    """
-    url = _get_ollama_url().rstrip("/")
-    try:
-        resp = httpx.get(f"{url}/api/tags", timeout=10.0)
-        resp.raise_for_status()
-        data = resp.json()
-        return [m.get("name", "") or m.get("model", "") for m in data.get("models", [])]
-    except Exception as e:  # noqa: BLE001
-        log.warning("review.vlm.list_models_failed", error=str(e))
-        return []
-
 
 def is_vlm_available() -> bool:
     """检查 VLM 是否可用。
 
-    自 SubTask 3.5 起转调 ``get_llm_provider().is_vlm_available()``，
-    由 Provider 抽象屏蔽 ollama / openai / anthropic 差异。
+    split-llm-vlm-config：转调 ``get_vlm_provider()``，由独立的 VLM 配置决定。
+    - 若无激活的 VLM 配置（``get_vlm_provider()`` 返回 None），视为不可用。
+    - 由 Provider 抽象屏蔽 ollama / openai / anthropic 差异。
     """
     try:
-        from app.services.ai import get_llm_provider
+        from app.services.ai import get_vlm_provider
 
-        return get_llm_provider().is_vlm_available()
+        provider = get_vlm_provider()
+        if provider is None:
+            return False
+        return provider.is_vlm_available()
     except Exception as e:  # noqa: BLE001
         log.warning("review.vlm.provider_unavailable", error=str(e))
         return False
-
-
-def _pick_vlm_model() -> str | None:
-    """从已安装模型中挑选首选视觉模型。"""
-    models = list_ollama_models()
-    if not models:
-        return None
-    lower_models = [m.lower() for m in models]
-    # 优先级顺序匹配
-    for pref in _VLM_PREFERENCE:
-        for i, m in enumerate(lower_models):
-            if pref in m:
-                return models[i]
-    # 关键字兜底
-    for i, m in enumerate(lower_models):
-        if any(kw in m for kw in _KNOWN_VLM_KEYWORDS):
-            return models[i]
-    return None
 
 
 # 图像尺寸阈值（VLM-02）：任一维度超过此值或文件大小超过 _MAX_IMAGE_BYTES 时降采样
@@ -212,39 +149,6 @@ def _encode_image(image_path: Path) -> str:
     return _read_and_encode_with_size_check(Path(image_path))
 
 
-def _ollama_chat_with_image(
-    model: str,
-    prompt: str,
-    image_b64: str,
-    timeout: float = 120.0,
-) -> str:
-    """[Deprecated] 调用 Ollama /api/chat，发送图片 + 文本 prompt，返回 assistant 文本。
-
-    使用 HTTP API 而非 ollama Python 包，便于控制 timeout 与错误处理。
-
-    自 SubTask 3.5 起业务路径改走 ``get_llm_provider().chat_with_image()``，
-    本函数保留仅为向后兼容（sketch_parser 等历史模块仍可能引用）。
-    """
-    url = f"{_get_ollama_url().rstrip('/')}/api/chat"
-    payload = {
-        "model": model,
-        "messages": [
-            {
-                "role": "user",
-                "content": prompt,
-                "images": [image_b64],
-            }
-        ],
-        "stream": False,
-    }
-    resp = httpx.post(url, json=payload, timeout=timeout)
-    resp.raise_for_status()
-    data = resp.json()
-    # 响应结构：{"message": {"role":"assistant","content":"..."}, ...}
-    msg = data.get("message") or {}
-    return str(msg.get("content", ""))
-
-
 # VLM-03：重试退避序列（秒），任务约定 1s / 2s / 4s —— 每次"重试"前的等待时长
 # 最多 3 次重试（首次调用 + 3 次重试 = 4 次调用），3 次重试分别等待 1s/2s/4s
 _VLM_RETRY_BACKOFF_SECONDS: tuple[float, ...] = (1.0, 2.0, 4.0)
@@ -333,8 +237,8 @@ def _vlm_call_with_retry(
 def vlm_detect_regions(image_path: Path) -> list[dict[str, Any]]:
     """调用 VLM 识别图纸中的区域（标题栏/标注区/视图区/明细栏）。
 
-    自 SubTask 3.5 起走 ``get_llm_provider().chat_with_image()``，
-    由 Provider 抽象屏蔽 ollama / openai / anthropic 差异。
+    split-llm-vlm-config：走 ``get_vlm_provider().chat_with_image()``，由独立的
+    VLM 配置决定调用哪个视觉模型，与 LLM 配置完全解耦。
 
     Args:
         image_path: PNG 图片路径
@@ -367,9 +271,12 @@ def vlm_detect_regions(image_path: Path) -> list[dict[str, Any]]:
     )
 
     try:
-        from app.services.ai import ChatMessage, get_llm_provider
+        from app.services.ai import ChatMessage, get_vlm_provider
 
-        provider = get_llm_provider()
+        provider = get_vlm_provider()
+        if provider is None:
+            log.warning("review.vlm.detect_regions.skipped", reason="vlm_no_active_config")
+            return []
         resp = _vlm_call_with_retry(
             provider,
             [ChatMessage(role="user", content=prompt)],
@@ -427,8 +334,8 @@ def vlm_ocr_extract(
 ) -> dict[str, Any]:
     """调用 VLM 对图片做 OCR，提取文字信息。
 
-    自 SubTask 3.5 起走 ``get_llm_provider().chat_with_image()``，
-    由 Provider 抽象屏蔽 ollama / openai / anthropic 差异。
+    split-llm-vlm-config：走 ``get_vlm_provider().chat_with_image()``，由独立的
+    VLM 配置决定调用哪个视觉模型，与 LLM 配置完全解耦。
 
     Args:
         image_path: PNG 图片路径
@@ -470,9 +377,12 @@ def vlm_ocr_extract(
     )
 
     try:
-        from app.services.ai import ChatMessage, get_llm_provider
+        from app.services.ai import ChatMessage, get_vlm_provider
 
-        provider = get_llm_provider()
+        provider = get_vlm_provider()
+        if provider is None:
+            log.warning("review.vlm.ocr.skipped", reason="vlm_no_active_config")
+            return {}
         resp = _vlm_call_with_retry(
             provider,
             [ChatMessage(role="user", content=prompt)],

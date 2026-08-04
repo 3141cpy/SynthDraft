@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>edrawings_export</AssemblyName>
+    <Version>0.1.0</Version>
+    <Description>eDrawings CLI 包装器：加载 SLDPRT/SLDASM 并导出 PNG 预览图</Description>
+    <!-- 输出直接到 bin\，与 Python edrawings_cli.py 的 _EDRAWINGS_EXPORT_CLI_DEFAULT_PATH 对齐 -->
+    <OutputPath>bin\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- 优先使用 eDrawings 官方互操作程序集（eDrawings.Interop.EModelViewControl.dll），
+         命名空间 eDrawings.Interop.EModelViewControl。官方互操作程序集正确支持 COM 事件连接点。
+         之前用 TypeLibConverter 自生成的互操作程序集（lib\EModelView.dll，命名空间 EModelView）
+         事件连接点不工作，导致 OpenDoc/Save 方法调用阻塞不返回（等待事件回调永远不触发）。
+         部署时需确保 eDrawings 已安装，或手动复制官方互操作程序集到 lib\ 目录。 -->
+    <Reference Include="eDrawings.Interop.EModelViewControl">
+      <HintPath>C:\Program Files\Common Files\eDrawings\eDrawings.Interop.EModelViewControl.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

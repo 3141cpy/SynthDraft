@@ -24,6 +24,10 @@ const ACCEPTED_EXTENSIONS = [
   "jpeg",
   "sldprt",
   "sldasm",
+  "step",
+  "stp",
+  "iges",
+  "igs",
 ];
 const ACCEPT_ATTR = ACCEPTED_EXTENSIONS.map((ext) => `.${ext}`).join(",");
 const MAX_SIZE_MB = 100;
@@ -50,7 +54,7 @@ export function FileUploader({
     async (file: File) => {
       const ext = getExtension(file.name);
       if (!ACCEPTED_EXTENSIONS.includes(ext)) {
-        const msg = `不支持的文件格式 ${ext || "(无后缀)"}，仅支持 DXF/DWG/PDF/PNG/JPG/SLDPRT/SLDASM`;
+        const msg = `不支持的文件格式 ${ext || "(无后缀)"}，仅支持 DXF/DWG/PDF/PNG/JPG/SLDPRT/SLDASM/STEP/IGES`;
         setLocalError(msg);
         toast.error(msg);
         return;
@@ -168,7 +172,7 @@ export function FileUploader({
             {isBusy ? "上传中..." : "拖拽文件到此处，或点击选择"}
           </div>
           <div className="text-xs text-muted-foreground">
-            支持 DXF / DWG / PDF / PNG / JPG / SLDPRT / SLDASM，单文件 ≤{" "}
+            支持 DXF / DWG / PDF / PNG / JPG / SLDPRT / SLDASM / STEP / IGES，单文件 ≤{" "}
             {MAX_SIZE_MB} MB
           </div>
         </div>

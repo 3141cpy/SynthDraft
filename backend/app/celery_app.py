@@ -56,6 +56,8 @@ celery_app.conf.update(
     result_expires=60 * 60 * 24 * 7,
     # 任务执行前预取 1 条（避免长任务饿死后继）
     worker_prefetch_multiplier=1,
+    # 启用 STARTED 状态上报（配合任务内 update_state PROGRESS 进度上报）
+    task_track_started=True,
     # 不发送默认事件以降低 broker 压力（如需监控可开启）
     task_send_sent_event=False,
     worker_send_task_events=False,
@@ -78,6 +80,17 @@ def _on_worker_ready(sender, **kwargs):  # noqa: ANN001
         instrument_celery()
     except Exception as e:  # noqa: BLE001
         log.warning("celery.tracing_init_failed", error=str(e))
+
+    # 预热 LLM/VLM 配置缓存（Celery worker 进程不导入 main.py，需主动预热）
+    try:
+        import asyncio
+
+        from app.services.ai.base import refresh_active_config_cache
+
+        asyncio.run(refresh_active_config_cache())
+        log.info("celery.worker_ready.cache_preheated")
+    except Exception as e:  # noqa: BLE001
+        log.warning("celery.worker_ready.preheat_cache_failed", error=str(e))
 
 
 try:

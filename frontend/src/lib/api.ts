@@ -1,4 +1,11 @@
-import type { UploadResponse } from "./types";
+import type {
+  AIConfigTestResult,
+  AIProviderConfig,
+  AIProviderConfigCreate,
+  AIProviderConfigUpdate,
+  ConfigRole,
+  UploadResponse,
+} from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "/api/v1";
 
@@ -154,4 +161,68 @@ export async function apiUpload(
   } finally {
     cleanup();
   }
+}
+
+// ===== AI Provider 配置 =====
+// 对照 backend/app/api/v1/endpoints/ai_config.py
+// 端点前缀：/ai/config
+
+/** 列出所有 provider 配置（api_key 脱敏）。
+ *
+ * split-llm-vlm-config：可选 ``role`` 参数按角色过滤。
+ * - role="llm" 仅返回文本模型配置
+ * - role="vlm" 仅返回视觉模型配置
+ * - 不传则返回全部配置
+ */
+export async function getAIConfigs(
+  role?: ConfigRole,
+): Promise<AIProviderConfig[]> {
+  const query = role ? `?role=${role}` : "";
+  return apiFetch<AIProviderConfig[]>(`/ai/config${query}`);
+}
+
+/** 新增 provider 配置。 */
+export async function createAIConfig(
+  data: AIProviderConfigCreate,
+): Promise<AIProviderConfig> {
+  return apiFetch<AIProviderConfig>(`/ai/config`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+/** 更新指定 provider 配置。api_key 传 undefined 表示不修改。 */
+export async function updateAIConfig(
+  id: number,
+  data: AIProviderConfigUpdate,
+): Promise<AIProviderConfig> {
+  return apiFetch<AIProviderConfig>(`/ai/config/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+/** 删除指定 provider 配置。 */
+export async function deleteAIConfig(id: number): Promise<void> {
+  await apiFetch<void>(`/ai/config/${id}`, {
+    method: "DELETE",
+  });
+}
+
+/** 激活指定 provider 配置（运行时热切换）。 */
+export async function activateAIConfig(
+  id: number,
+): Promise<AIProviderConfig> {
+  return apiFetch<AIProviderConfig>(`/ai/config/${id}/activate`, {
+    method: "POST",
+  });
+}
+
+/** 测试指定 provider 配置的连通性（文本模型 + 视觉模型）。 */
+export async function testAIConfig(
+  id: number,
+): Promise<AIConfigTestResult> {
+  return apiFetch<AIConfigTestResult>(`/ai/config/${id}/test`, {
+    method: "POST",
+  });
 }

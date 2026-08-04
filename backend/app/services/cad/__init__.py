@@ -35,6 +35,7 @@ from app.services.cad.occ_engine import (
     get_surface_area,
     get_volume,
     is_occ_available,
+    read_iges_file,
     read_step_file,
 )
 
@@ -50,6 +51,7 @@ __all__ = [
     "OCCEngineNotAvailableError",
     "is_occ_available",
     "read_step_file",
+    "read_iges_file",
     "get_bounding_box",
     "get_volume",
     "get_surface_area",

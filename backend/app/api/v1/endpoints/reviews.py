@@ -76,6 +76,7 @@ async def get_review_result(
     状态：
     - PENDING：任务排队中或不存在
     - STARTED/RETRY：执行中
+    - PROGRESS：执行中（携带 step/progress 进度元数据）
     - SUCCESS：返回 ReviewResult
     - FAILURE：返回错误信息
     """
@@ -98,14 +99,18 @@ async def get_review_result(
                 "message": "任务排队中或任务 ID 不存在",
             },
         )
-    if state in ("STARTED", "RETRY"):
+    if state in ("STARTED", "RETRY", "PROGRESS"):
+        content = {
+            "task_id": task_id,
+            "status": "running",
+            "message": f"任务执行中（state={state}）",
+        }
+        if state == "PROGRESS" and isinstance(result.info, dict):
+            content["step"] = result.info.get("step", "")
+            content["progress"] = result.info.get("progress", 0)
         return JSONResponse(
             status_code=status.HTTP_200_OK,
-            content={
-                "task_id": task_id,
-                "status": "running",
-                "message": f"任务执行中（state={state}）",
-            },
+            content=content,
         )
     if state == "FAILURE":
         exc = result.result

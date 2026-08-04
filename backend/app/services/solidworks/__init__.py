@@ -88,6 +88,13 @@ from app.services.solidworks.writer import (
     generate_sldprt_from_features,
 )
 
+# SubTask P0-3: eDrawings CLI 渲染器（SLDPRT/SLDASM L3a 降级）
+# edrawings_cli.py 提供 eDrawings 包装 + C# CLI subprocess 调用
+from app.services.solidworks.edrawings_cli import (
+    is_edrawings_available,
+    render_sldprt_via_edrawings,
+)
+
 __all__ = [
     # 异常
     "SolidWorksLicenseError",
@@ -119,4 +126,7 @@ __all__ = [
     "generate_sldprt_from_cadquery",
     "generate_sldprt_from_features",
     "generate_sldasm_from_components",
+    # eDrawings CLI（P0-3）
+    "is_edrawings_available",
+    "render_sldprt_via_edrawings",
 ]

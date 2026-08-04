@@ -18,12 +18,37 @@ log = get_logger(__name__)
 class BaseTask(Task):
     """项目统一任务基类。
 
+    - before_start：执行前刷新 AI 配置缓存（LLM/VLM）
     - on_failure：记录失败日志，将异常信息写入 result
     - on_success：记录成功日志
     """
 
     name = "app.celery.base.BaseTask"
     abstract = True
+
+    def before_start(self, task_id: str, args: tuple, kwargs: dict) -> None:
+        """任务执行前刷新 AI 配置缓存（LLM/VLM）。
+
+        使用 psycopg2 同步直连 DB，避免 Celery --pool=threads 下 asyncio.run
+        与 asyncpg 事件循环冲突。失败仅记 warning 日志，不阻断任务执行。
+        """
+        from app.services.ai.base import refresh_active_config_cache_sync
+
+        try:
+            refresh_active_config_cache_sync()
+            log.info(
+                "task.before_start.cache_refreshed",
+                task_id=task_id,
+                task_name=self.name,
+            )
+        except Exception as exc:
+            log.warning(
+                "task.before_start.refresh_failed",
+                task_id=task_id,
+                task_name=self.name,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
 
     def on_failure(
         self,

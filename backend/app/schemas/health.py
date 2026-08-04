@@ -8,14 +8,21 @@ from pydantic import BaseModel
 
 
 class HealthResponse(BaseModel):
-    """存活探针响应。仅表明进程在跑。"""
+    """存活探针响应。仅表明进程在跑。
+
+    split-llm-vlm-config：分别暴露 LLM 与 VLM 的 provider 名称与可用性，
+    便于前端设置页与运维监控独立感知两者状态。``vlm_provider`` 为空串表示
+    未配置视觉模型（``get_vlm_provider()`` 返回 None）。
+    """
 
     status: Literal["ok"] = "ok"
     service: str
     version: str
-    # SubTask 3.6：暴露 LLM provider 状态（向后兼容，默认值确保旧客户端不破坏）
+    # LLM（文本模型）状态
     llm_provider: str = ""
     llm_available: bool = False
+    # VLM（视觉模型）状态：vlm_provider 空串表示未配置
+    vlm_provider: str = ""
     vlm_available: bool = False
 
 

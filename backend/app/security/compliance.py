@@ -263,7 +263,7 @@ def _check_vllm_quantization() -> CheckResult:
             remediation="GPU 节点可启用 VLLM_ENABLED=true 并配置 VLLM_QUANTIZATION=awq",
             auto_detect=False,
         )
-    quant = settings.VLLM_QUANTIZATION
+    quant = getattr(settings, "VLLM_QUANTIZATION", "")
     return CheckResult(
         check_id="T-009",
         name="vLLM GPU 量化",
@@ -273,7 +273,7 @@ def _check_vllm_quantization() -> CheckResult:
         status="pass" if quant else "warn",
         description="vLLM 启用时应配置量化（awq/gptq/int8）以降低显存占用",
         evidence=f"VLLM_QUANTIZATION={quant or 'none'}",
-        remediation="在 .env 中设置 VLLM_QUANTIZATION=awq 或 gptq",
+        remediation="vLLM 量化现为服务端启动参数，请通过 DB 配置 vlm_model 并在 vLLM 启动时指定 --quantization",
     )
 
 

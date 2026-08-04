@@ -106,7 +106,7 @@ class CADViewLayout(BaseModel):
 # ===== 顶层模型 =====
 
 
-SourceFormat = Literal["dxf", "dwg", "step", "iges", "unknown"]
+SourceFormat = Literal["dxf", "dwg", "step", "iges", "image", "sldprt", "sldasm", "unknown"]
 
 
 class CADIntermediateModel(BaseModel):

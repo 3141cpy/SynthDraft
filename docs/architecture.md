@@ -224,13 +224,79 @@ graph TB
 
 - **抽象基类 `BaseLLMProvider`**：4 个抽象方法 `is_available` / `is_vlm_available` / `chat` / `chat_with_image`
 - **统一 schema**：`ChatMessage`（role/content/images）+ `ChatResponse`（content/model/usage/raw）
-- **工厂路由**：`get_llm_provider()` 根据 `settings.LLM_PROVIDER` 路由到 `ollama` / `openai` / `anthropic`，路由失败抛 `ValueError`
-- **单例缓存**：`_provider_instance` 全局复用，`reset_provider_cache()` 用于测试
+- **Provider 注册表**（来源：`registry.py`）：替代 if/elif 工厂链，provider 通过 `@register_provider("ollama")` 装饰器自注册到全局 `_PROVIDERS` 表，工厂 `get_provider_class()` 按 `provider_type` 查找；`list_provider_types()` 返回已注册类型
+- **工厂路由**：`get_llm_provider()` / `get_llm_provider_async()` 从数据库激活配置读取 `provider_type`，经 registry 实例化；DB 无配置或不可达时回退 legacy 路径（`settings.LLM_PROVIDER`），路由失败抛 `ValueError`
+- **单例缓存**：`_provider_instance` 全局复用；配置变更时由 `config_store.activate_config` 调用 `reset_provider_cache()`（清空实例 + 配置缓存）+ `refresh_active_config_cache()`（预填新激活配置），实现运行时热切换
 - **三个 Provider 实现**：
   - `OllamaProvider`：复用 `vlm_ocr.list_ollama_models` 探测视觉模型（来源：`providers/ollama_provider.py` §"视觉模型探测"）
   - `OpenAIProvider`：兼容 vLLM / DeepSeek / 通义千问 / 智谱 GLM / OpenAI 官方
   - `AnthropicProvider`：Claude 3.5 Sonnet
 - **流式输出**（来源：`streaming.py`）：基于 generator 逐 chunk 产出，Redis 标志位 `llm_stream:cancel:{request_id}` 实现跨进程主动取消；`LLM_STREAM_ENABLED=False` 或 Redis 不可用时回退为一次性返回
+
+#### 3.2.1 AI Provider 配置架构（统一配置抽象）
+
+> 来源：`backend/app/schemas/ai_config.py` + `services/ai/registry.py` + `services/ai/config_store.py` + `models/ai_provider_config.py` + `.trae/specs/unify-ai-provider-config/spec.md`
+
+**设计动机**：原架构存在 4 个分化 provider 配置 schema（`OLLAMA_*` / `VLLM_*` / `OPENAI_*` / `ANTHROPIC_*` 各自独立前缀），切换 provider 需编辑 `.env` 并重启服务，前端无配置 UI，且 `VLM_MODEL` 字段已孤立（无 provider 读取）。统一抽象后，所有 provider 一视同仁，仅 `base_url` 与 `api_key` 不同，前端可在 `/settings` 页面完成全部配置并运行时热切换。
+
+**统一 5 字段配置模型**（来源：`schemas/ai_config.py::AIProviderConfigBase`）：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `name` | `str` | 配置名称（1-100 字符） |
+| `provider_type` | `Literal["ollama", "openai_compatible", "anthropic"]` | Provider 类型 |
+| `base_url` | `str` | 服务基础 URL（如 `http://localhost:11434`、`https://api.openai.com/v1`） |
+| `api_key` | `str` | API key，本地模型留空 |
+| `model` | `str` | 文本模型名称 |
+| `vlm_model` | `str` | 视觉模型名称，留空表示不支持 |
+
+> **BREAKING**：`OPENAI` / `vLLM` / `DeepSeek` / `通义千问` / `智谱` 等 OpenAI 兼容 API 统一归为 `openai_compatible` 类型，仅 `base_url` 不同。原 `VLM_MODEL` 孤立字段与 `should_desensitize_for_provider()` 死代码已移除。
+
+**Provider 注册表模式**（来源：`services/ai/registry.py`）：
+
+替代 `base.py` 中的 if/elif 工厂链。provider 通过 `@register_provider` 装饰器自注册到全局 `_PROVIDERS` 表，工厂按 `provider_type` 查找。注册时机为 provider 模块被 import 时；`providers/__init__.py` 预导入所有 provider 模块触发注册，`base._ensure_providers_imported` 在工厂首次调用前兜底触发。
+
+```python
+@register_provider("ollama")
+class OllamaProvider(BaseLLMProvider): ...
+
+# 工厂查找
+cls = get_provider_class(config.provider_type)  # 返回类或 None
+list_provider_types()  # ["ollama", "openai_compatible", "anthropic"]
+```
+
+**数据库持久化 + Fernet 加密**（来源：`models/ai_provider_config.py` + `services/ai/config_store.py`）：
+
+- 新增 `ai_provider_configs` 表，支持多 provider 配置共存 + `is_active` 激活选择
+- API key 复用 `app/security.py` 的 Fernet 对称加密，密文存于 `api_key_encrypted` 列
+- `GET` 接口始终脱敏返回：有 key 返回 `"***"`，无 key 返回空串
+- 服务层 `config_store` 提供 `list_configs` / `get_config` / `get_active_config` / `create_config` / `update_config` / `delete_config` / `activate_config` / `test_config` / `migrate_from_env` 共 9 个函数
+
+**运行时热切换**（来源：`services/ai/base.py`）：
+
+激活新配置时无需重启服务，缓存失效链如下：
+
+1. `config_store.activate_config(db, config_id)` 更新 DB `is_active` 标志
+2. 调用 `reset_provider_cache()`：清空 `_provider_instance` / `_active_config_cache` / `_config_cache_loaded`
+3. 调用 `refresh_active_config_cache()`：async 预填新激活配置到同步缓存
+4. 下次 `get_llm_provider()` 调用即重新解析并实例化新 provider
+
+`get_llm_provider()`（sync）解析顺序：已缓存实例 → 同步读 DB 激活配置 → legacy fallback（`settings.LLM_PROVIDER`）；`get_llm_provider_async()`（async）为 DB 直读正规路径，读取成功后顺带刷新同步缓存。
+
+**.env 兼容迁移**（来源：`config_store.migrate_from_env` + `main.py::lifespan`）：
+
+- 应用启动 lifespan 中先 `init_db()` 建表，再 `migrate_from_env(session)` 迁移
+- 当 DB 无 provider 配置但 `.env` 存在旧配置时，按 `LLM_PROVIDER` 自动迁移为一条 DB 记录
+- 迁移失败不阻断启动（仅记录 warning），DB 不可用时服务仍可启动
+- `.env` 旧字段（`LLM_PROVIDER` / `OPENAI_*` / `ANTHROPIC_*` / `OLLAMA_*`）仅作首次迁移源与 legacy fallback，运行时配置以 DB 为准
+
+**前端配置管理**（来源：`frontend/src/app/settings/page.tsx`）：
+
+- 新增 `/settings` 路由，用户可在 UI 完成全部 AI provider 配置，无需编辑 `.env`
+- `ProviderConfigCard`：配置卡片列表，显示名称/类型/模型/状态徽章（活跃/未激活/连接失败）
+- `ProviderConfigForm`：统一 5 字段表单，provider 类型选择后自动填充默认 `base_url`
+- "测试连接"按钮调用 `POST /api/v1/ai/config/{id}/test`，显示成功/失败 + 延迟
+- "激活"按钮设为当前活跃 provider，立即生效（运行时热切换）
 
 ### 3.3 kb 模块（工程规范知识库）
 

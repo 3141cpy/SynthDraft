@@ -34,8 +34,9 @@ log = get_logger(__name__)
 
 # 复用 vlm_ocr 中的私有函数（Python 下划线前缀仅阻止通配符导入，
 # 不阻止显式导入；同 backend.app 包内可调用）
-# 注意：_ollama_chat_with_image / _pick_vlm_model 自 SubTask 3.5 起不再用于业务路径，
-# 仅保留 _encode_image / _parse_json_object_from_text 供 sketch_parser 复用。
+# 注意：Task 4 起 vlm_ocr 已移除直接 Ollama HTTP 访问（_ollama_chat_with_image /
+# _pick_vlm_model / list_ollama_models），VLM 调用统一走 provider.chat_with_image。
+# 本模块复用 vlm_ocr 的图像编码 / JSON 解析 / 重试工具。
 # VLM-03：复用 _vlm_call_with_retry 为 provider.chat_with_image 提供指数退避重试。
 from app.services.review.vlm_ocr import (  # noqa: E402
     _encode_image,

@@ -1,7 +1,7 @@
-"""OpenAI 兼容 LLM Provider（SubTask 3.3）。
+"""OpenAI 兼容 LLM Provider（SubTask 3.3 + Task 2.4 适配统一配置）。
 
 支持厂商：OpenAI 官方 / vLLM / DeepSeek / 通义千问 / 智谱 GLM 等 OpenAI 兼容端点。
-通过 OPENAI_BASE_URL 切换端点，OPENAI_API_KEY 鉴权。
+通过 ``AIProviderConfig.base_url`` 切换端点，``api_key`` 鉴权。
 
 官方文档：
 - Chat Completions API: https://platform.openai.com/docs/api-reference/chat
@@ -15,47 +15,30 @@
   与 {"type": "text", "text": "..."} 共存于 user message 的 content 数组中
 - 响应: resp.choices[0].message.content / resp.usage.{prompt,completion,total}_tokens
 
-配置项（SubTask 3.6 将在 settings 中正式添加，本 subtask 暂用环境变量兜底）：
-- OPENAI_API_KEY：API Key
-- OPENAI_BASE_URL：兼容端点 URL（默认 https://api.openai.com/v1）
-- OPENAI_MODEL：文本模型（默认 gpt-4o-mini）
-- OPENAI_VLM_MODEL：视觉模型（默认空，决定 is_vlm_available）
+配置来源（Task 2.4）：构造函数接受 ``AIProviderConfig``，从中读取
+``base_url`` / ``api_key``（经 Fernet 解密）/ ``model`` / ``vlm_model``。
+已移除 ``_get_env()`` 混合模式，统一从 config 读取。
 
 降级路径：API Key 未配置或调用失败时返回空 ChatResponse + warning，不抛异常。
 """
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from app.logging import get_logger
+from app.security import decrypt_value
 from app.services.ai.base import BaseLLMProvider, ChatMessage, ChatResponse
+from app.services.ai.registry import register_provider
 
 log = get_logger(__name__)
 
-# 默认模型与端点
+# 默认模型与端点（config 字段缺失或为空时兜底）
 _DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 _DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 
 
-def _get_env(key: str, default: str = "") -> str:
-    """从环境变量读取配置（SubTask 3.6 后改读 settings）。
-
-    优先尝试 settings 字段（若已添加），失败则回退环境变量。
-    """
-    # 3.6 添加 settings 字段后，此处可平滑切换；当前先用环境变量
-    try:
-        from app.config import settings
-
-        val = getattr(settings, key, None)
-        if val:
-            return str(val)
-    except Exception:  # noqa: BLE001
-        pass
-    return os.environ.get(key, default)
-
-
+@register_provider("openai_compatible")
 class OpenAIProvider(BaseLLMProvider):
     """OpenAI 兼容 Provider。
 
@@ -63,11 +46,13 @@ class OpenAIProvider(BaseLLMProvider):
     is_available() 返回 False，chat*() 返回空 ChatResponse。
     """
 
-    def __init__(self) -> None:
-        self._api_key: str = _get_env("OPENAI_API_KEY")
-        self._base_url: str = _get_env("OPENAI_BASE_URL", _DEFAULT_OPENAI_BASE_URL)
-        self._model: str = _get_env("OPENAI_MODEL", _DEFAULT_OPENAI_MODEL) or _DEFAULT_OPENAI_MODEL
-        self._vlm_model: str = _get_env("OPENAI_VLM_MODEL")
+    def __init__(self, config: Any) -> None:
+        self._api_key: str = decrypt_value(getattr(config, "api_key_encrypted", "") or "")
+        self._base_url: str = (
+            (getattr(config, "base_url", "") or "").rstrip("/") or _DEFAULT_OPENAI_BASE_URL
+        )
+        self._model: str = (getattr(config, "model", "") or "").strip() or _DEFAULT_OPENAI_MODEL
+        self._vlm_model: str = getattr(config, "vlm_model", "") or ""
         self._client: Any | None = None
         self._init_error: str | None = None
         self._init_client()

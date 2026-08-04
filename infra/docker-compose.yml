@@ -82,23 +82,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ===== Ollama v0.30.6 (本地 LLM/VLM 推理，开发环境) =====
-  # Tag confirmed via GitHub Releases: ollama/ollama v0.30.6
-  # GPU 支持需安装 NVIDIA Container Toolkit，此处默认 CPU 模式
-  ollama:
-    image: ollama/ollama:0.30.6
-    container_name: synthdraft-ollama
-    restart: unless-stopped
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/11434' || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-
   # ===== vLLM v0.25.0 (高性能 LLM 推理，GPU 节点，P0 可不启用) =====
   # Tag confirmed via GitHub Releases: vllm-project/vllm v0.25.0
   # 默认 profile 不启动；通过 --profile gpu 启用
@@ -153,7 +136,6 @@ services:
       CELERY_RESULT_BACKEND: redis://redis:6379/2
       QDRANT_URL: http://qdrant:6333
       MINIO_ENDPOINT: minio:9000
-      OLLAMA_HOST_URL: http://ollama:11434
     ports:
       - "8000:8000"
     depends_on:
@@ -185,7 +167,6 @@ services:
       CELERY_RESULT_BACKEND: redis://redis:6379/2
       QDRANT_URL: http://qdrant:6333
       MINIO_ENDPOINT: minio:9000
-      OLLAMA_HOST_URL: http://ollama:11434
     depends_on:
       postgres:
         condition: service_healthy
@@ -220,5 +201,4 @@ volumes:
   redis_data:
   qdrant_data:
   minio_data:
-  ollama_data:
   vllm_data:

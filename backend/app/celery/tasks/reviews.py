@@ -83,13 +83,14 @@ def run_review(
     )
 
     # ===== 步骤 1：解析文件路径（P0 降级：本地 tmp_uploads/）=====
-    dxf_path = _resolve_file_path(file_key)
-    if not dxf_path.is_file():
-        raise FileNotFoundError(f"审图文件不存在: {dxf_path}")
+    file_path = _resolve_file_path(file_key)
+    if not file_path.is_file():
+        raise FileNotFoundError(f"审图文件不存在: {file_path}")
 
     # ===== 步骤 2：prepare_review_context =====
-    log.info("review.task.prepare_context", task_id=task_id, path=str(dxf_path))
-    ctx = prepare_review_context(dxf_path)
+    log.info("review.task.prepare_context", task_id=task_id, path=str(file_path))
+    ctx = prepare_review_context(file_path)
+    self.update_state(state="PROGRESS", meta={"step": "prepare_context", "progress": 10})
 
     # ===== 步骤 3：VLM OCR + 语义融合 =====
     vlm_result: dict[str, Any] = {}
@@ -97,6 +98,7 @@ def run_review(
     if vlm_available and ctx.image_path:
         log.info("review.task.vlm_detect", task_id=task_id)
         regions = vlm_detect_regions(Path(ctx.image_path))
+        self.update_state(state="PROGRESS", meta={"step": "vlm_detect", "progress": 25})
         vlm_result = vlm_ocr_extract(Path(ctx.image_path), regions)
     else:
         log.info(
@@ -107,12 +109,14 @@ def run_review(
         )
 
     semantic_model = fuse_to_semantic_model(ctx.cad_model, vlm_result)
+    self.update_state(state="PROGRESS", meta={"step": "vlm_ocr", "progress": 40})
 
     # ===== 步骤 4：检索 + 判定 =====
     log.info("review.task.judge", task_id=task_id, llm_available=is_llm_available())
     defects, judge_mode, llm_model = judge_with_fallback(
         semantic_model, use_llm=True, top_k=5
     )
+    self.update_state(state="PROGRESS", meta={"step": "judge", "progress": 80})
 
     # 综合审图模式：vlm / vector_only / rule_engine
     if judge_mode == "llm":
@@ -160,6 +164,7 @@ def run_review(
             result.pdf_report_path = str(pdf_path)
     except Exception as e:  # noqa: BLE001
         log.error("review.task.report_failed", task_id=task_id, error=str(e))
+    self.update_state(state="PROGRESS", meta={"step": "report", "progress": 95})
 
     elapsed_ms = int((time.perf_counter() - t_start) * 1000)
     result.metadata["elapsed_ms"] = elapsed_ms
