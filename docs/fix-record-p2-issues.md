@@ -317,11 +317,102 @@ def _map_state(state: str) -> str:
 
 ---
 
+## P-001：collaboration 队列无 worker（联动测试发现）
+
+### 问题描述
+`POST /api/v1/collaboration/optimize-from-review` 派发的生成任务使用 `queue="default"`，
+而 Celery worker 仅监听 `reviews,generations` 队列，导致任务永远 PENDING，审图→协同→生成闭环断裂。
+
+### 根因
+`backend/app/api/v1/endpoints/collaboration.py` 第 86 行 `apply_async(..., queue="default")`，
+但系统中不存在 default 队列 worker（celery_app 只路由到 reviews/generations/solidworks/sketch/assembly/collaboration 6 个队列）。
+
+### 修复前
+- 文件: `backend/app/api/v1/endpoints/collaboration.py`
+- 代码:
+```python
+task = run_generation.apply_async(
+    kwargs={...},
+    queue="default",  # 无 worker 监听此队列
+)
+```
+
+### 修复后
+- 代码:
+```python
+task = run_generation.apply_async(
+    kwargs={...},
+    queue="generations",  # 复用已有 worker 的 generations 队列
+)
+```
+
+### 回归测试
+- 测试步骤: 重启后端 → 提交审图（安全阀.pdf）→ 调用 optimize-from-review → 轮询任务状态
+- 测试结果: **通过**
+- 实际值: optimize 任务在 generations 队列被立即消费，status="succeeded"，defects_count=5，optimized_prompt 生成成功
+- 修复后 P-001 与 P2-2 联动验证：审图任务状态依次 running(progress 10→25→40) → succeeded
+
+---
+
+## P-002：Embedding 模型 HF_HOME 未配置（联动测试发现）
+
+### 问题描述
+`POST /api/v1/kb/reindex` 与 `GET /api/v1/kb/clauses` 返回 503：
+`"无法加载任何 embedding 模型：bge-m3 / sentence-transformers / Ollama 均失败"`。
+但 bge-m3 模型实际已完整下载至 `D:\synthdraft_hf_cache\hub\models--BAAI--bge-m3\`（pytorch_model.bin 等文件齐全）。
+
+### 根因
+`HF_HOME` 环境变量未设置。huggingface_hub 的 `snapshot_download` 默认使用
+`~/.cache/huggingface`（C 盘）查找模型缓存，找不到本地模型后尝试经 hf-mirror 联网下载失败
+（沙箱网络受限），导致模型加载链全失败。
+
+### 修复前
+- 文件: `backend/app/services/kb/embedder.py`
+- 代码:
+```python
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "60")
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+# 未设置 HF_HOME → snapshot_download 去 C 盘查找 → 找不到 → 联网下载 → 失败
+```
+
+### 修复后
+- 代码:
+```python
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "60")
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+# HF_HOME：指向本地 HuggingFace 缓存目录（bge-m3 模型已预下载至此）。
+# 未设置时 huggingface_hub 默认使用 ~/.cache/huggingface（C 盘），找不到模型会尝试联网下载。
+# 优先尊重环境变量；其次尝试 D:\synthdraft_hf_cache（当前环境模型实际存放位置）。
+_HF_HOME_CANDIDATES = [
+    os.environ.get("HF_HOME"),
+    r"D:\synthdraft_hf_cache",
+]
+for _cand in _HF_HOME_CANDIDATES:
+    if _cand and os.path.isdir(_cand):
+        os.environ.setdefault("HF_HOME", _cand)
+        os.environ.setdefault("HF_HUB_CACHE", os.path.join(_cand, "hub"))
+        break
+```
+- 同时 `_BGE_M3_ALLOW_PATTERNS` 添加 `"pytorch_model.bin"`（本地缓存为 .bin 格式而非 .safetensors，
+  缺失该模式会导致 snapshot_download 校验时认为文件不完整而触发重新下载）
+
+### 回归测试
+- 测试步骤: 重启后端 → POST /api/v1/kb/reindex → GET /api/v1/kb/clauses（形位公差 / 尺寸标注）
+- 测试结果: **通过**
+- reindex: 200，indexed_count=42，耗时 33.2s（bge-m3 从 D:\synthdraft_hf_cache 成功加载）
+- clauses"形位公差": 200，5 条结果（位置度 0.645 / 圆度 0.608 / 角度一般公差 0.597 / 圆柱度 0.596 / 同轴度 0.579）
+- clauses"尺寸标注": 200，3 条结果（基本规则 0.731 / CAD 关联标注 0.706 / 尺寸数字 0.696）
+- standards 列表: 200，6 个规范
+
+---
+
 ## 总结
 
-- **修复完成: 3/3**
-- **回归测试通过: 3/3**
-- **遗留问题: 无**
+- **修复完成: 5/5**
+- **回归测试通过: 5/5**
+- **遗留问题: 无（P2-1/P2-2/P2-3/P-001/P-002 全部修复）**
 
 ### 修改文件清单
 1. `backend/app/celery/tasks/generations.py` — 新增 `_get_active_llm_model()` 函数，metadata.llm_model 改读数据库活跃配置
@@ -330,7 +421,9 @@ def _map_state(state: str) -> str:
 4. `backend/app/api/v1/endpoints/reviews.py` — SUCCESS 状态术语 "completed"→"succeeded"
 5. `backend/app/api/v1/endpoints/generations.py` — 添加 PROGRESS 状态到 running 分支
 6. `backend/app/services/review/image_preprocess.py` — `load_image` 改用 np.fromfile + cv2.imdecode（中文路径可靠方案）
+7. `backend/app/api/v1/endpoints/collaboration.py` — P-001：队列路由 default→generations
+8. `backend/app/services/kb/embedder.py` — P-002：HF_HOME 自动检测（D:\synthdraft_hf_cache）+ allow_patterns 添加 pytorch_model.bin
 
 ### 后端重启记录
 - Celery worker: 已重启（P2-1、P2-3 代码在 Celery 进程执行）
-- Uvicorn: 已重启（P2-2 代码在 API 进程执行，原 --reload 未生效因存在孤儿进程占用端口）
+- Uvicorn: 已重启（P2-2/P-001/P-002 代码在 API 进程执行，原 --reload 未生效因存在孤儿进程占用端口）

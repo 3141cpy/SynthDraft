@@ -43,6 +43,18 @@ _OLLAMA_DEFAULT_URL = "http://localhost:11434"
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "60")
 os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+# HF_HOME：指向本地 HuggingFace 缓存目录（bge-m3 模型已预下载至此）。
+# 未设置时 huggingface_hub 默认使用 ~/.cache/huggingface（C 盘），找不到模型会尝试联网下载。
+# 优先尊重环境变量；其次尝试 D:\synthdraft_hf_cache（当前环境模型实际存放位置）。
+_HF_HOME_CANDIDATES = [
+    os.environ.get("HF_HOME"),
+    r"D:\synthdraft_hf_cache",
+]
+for _cand in _HF_HOME_CANDIDATES:
+    if _cand and os.path.isdir(_cand):
+        os.environ.setdefault("HF_HOME", _cand)
+        os.environ.setdefault("HF_HUB_CACHE", os.path.join(_cand, "hub"))
+        break
 
 # bge-m3 仓库中推理必需的文件清单。
 # 仓库内还存在 imgs/.DS_Store 等 macOS 元数据/文档图片,在 hf-mirror 上 403 Forbidden,
@@ -60,6 +72,7 @@ _BGE_M3_ALLOW_PATTERNS = (
     "special_tokens_map.json",
     "1_Pooling/config.json",
     "model.safetensors",
+    "pytorch_model.bin",
 )
 
 
