@@ -10,8 +10,8 @@ AI 驱动工程设计辅助系统 —— 提供智能审图与智能生成两大
 
 ## 核心功能
 
-- **智能审图**：上传工程图纸（SolidWorks 原生文件 / DWG / DXF / PDF / 截图），AI 自动审查是否符合国标规范，输出合规性评分、缺陷列表、定位标注与修改建议。
-- **智能生成**：根据自然语言描述或手绘草图，生成可编辑的 CadQuery 参数化建模代码，并产出 DXF / STEP / STL / SLDPRT 等文件。
+- **智能审图**：支持 7 种文件类型端到端审图（PDF / DWG / image / STEP / IGES / SLDPRT / SLDASM），AI 自动审查是否符合国标规范，输出合规性评分、缺陷列表、定位标注与修改建议。
+- **智能生成**：根据自然语言描述或手绘草图，生成可编辑的 CadQuery 参数化建模代码，并产出 DXF / STEP / IGES / STL / SLDPRT 等文件。
 - **知识库检索**：基于国标 GB/T 标准的 RAG 检索（bge-m3 嵌入 + Qdrant 向量库），关键结论强制引用规范原文条款编号，杜绝 LLM 幻觉。
 - **SolidWorks 集成**：Windows 端 SolidWorks 插件（C# Add-in），支持在 SolidWorks 内直接触发审图/生成，并产出 SLDPRT/SLDASM 原生文件。
 - **多模态理解**：图纸图像 OCR + VLM 理解（YOLOv11 区域检测 + PaddleOCR 区域受限 OCR + VLM 语义解析），覆盖"感知 → 语义 → 工程语义"四层认知框架。
